@@ -1,0 +1,5 @@
+MetaTrader5
+python-telegram-bot>=20.0
+pandas
+numpy
+pytz
