@@ -1,10 +1,12 @@
 import logging
 import asyncio
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 import config
 from data_provider import MT5DataProvider
 from analyzer import XAUAnalyzer
+from chart_generator import generate_candlestick_chart
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -93,6 +95,31 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "_Do your own research (DYOR)._"
         )
         
+        # Update status and send chart
+        await status_message.edit_text("📈 *Analisis selesai. Sedang menggambar grafik...*", parse_mode="Markdown")
+        
+        chart_path = "chart.png"
+        try:
+            generate_candlestick_chart(
+                df=analyzer.df_h1,
+                zones=zones,
+                current_price=current_price,
+                pivots=analyzer.pivots,
+                symbol=config.MT5_SYMBOL,
+                timeframe="H1",
+                save_path=chart_path
+            )
+            
+            # Send the generated chart photo
+            with open(chart_path, 'rb') as photo:
+                await update.message.reply_photo(photo=photo, caption=f"📈 Chart Analisis {config.MT5_SYMBOL} (H1)")
+                
+            # Clean up local file
+            if os.path.exists(chart_path):
+                os.remove(chart_path)
+        except Exception as chart_err:
+            logger.error(f"Failed to generate/send chart: {chart_err}")
+            
         await status_message.edit_text(response, parse_mode="Markdown")
 
     except Exception as e:

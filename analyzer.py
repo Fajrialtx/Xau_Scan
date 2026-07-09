@@ -277,6 +277,7 @@ class XAUAnalyzer:
         # 1. Fetch historical rates for H4, H1, M30, M15, Daily
         df_h4 = self.dp.fetch_rates("H4", 300)
         df_h1 = self.dp.fetch_rates("H1", 300)
+        self.df_h1 = df_h1
         df_m30 = self.dp.fetch_rates("M30", 300)
         df_m15 = self.dp.fetch_rates("M15", 300)
         df_d1 = self.dp.fetch_rates("D1", 10)
@@ -297,6 +298,7 @@ class XAUAnalyzer:
         
         # Fetch pivot levels & VWAP
         pivots = self.calculate_pivot_points(df_d1)
+        self.pivots = pivots
         vwap = self.calculate_vwap_today(df_m15)
         
         # Fetch Asia Session range
