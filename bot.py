@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory storage for scan state
 last_scanned_zones = {}  # chat_id -> list of TradingZone
-user_states = {}         # chat_id -> dict
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /start command."""
@@ -66,105 +66,90 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Format output message
-        response = (
+        # Update status message
+        await status_message.edit_text(
             f"📊 **HASIL SCANNING {config.MT5_SYMBOL} (Proyeksi 2-3 Jam)**\n"
             f"Harga Saat Ini: **{current_price:.2f}**\n"
-            f"Ditemukan **{len(zones)}** zona entry potensial.\n"
-            f"----------------------------------------\n\n"
+            f"Ditemukan **{len(zones)}** zona entry potensial. Mengirim grafik per area...",
+            parse_mode="Markdown"
         )
         
         for idx, zone in enumerate(zones):
+            # Format report text for this specific zone
             emoji = "🟢" if zone.zone_type == "BUY" else "🔴"
             prob_label = "🔥 High Probability" if zone.score >= config.HIGH_PROBABILITY_SCORE else "⚡ Medium Probability"
             
-            response += (
+            zone_text = (
+                f"📊 **HASIL SCANNING {config.MT5_SYMBOL}**\n"
+                f"Harga Saat Ini: **{current_price:.2f}**\n"
+                f"----------------------------------------\n\n"
                 f"{emoji} **SETUP {idx+1}: {zone.zone_type} AREA**\n"
                 f"📍 Zona Entry: **{zone.bottom:.2f} - {zone.top:.2f}**\n"
                 f"⭐ Skor: **{zone.score:.1f} / 13.0** ({prob_label})\n\n"
                 f"💬 *Detail Konfluensi:*\n"
             )
             for detail in zone.details:
-                response += f"• {detail}\n"
+                zone_text += f"• {detail}\n"
                 
-            response += (
+            zone_text += (
                 f"\n🛡️ *Proteksi & Target:*\n"
                 f"• SL: **{zone.sl:.2f}**\n"
                 f"• TP 1: **{zone.tp1:.2f}**\n"
                 f"• TP 2: **{zone.tp2:.2f}**\n"
                 f"• Status: **PENDING**\n"
                 f"----------------------------------------\n\n"
+                f"⚠️ _Not Financial Advice. DYOR._"
             )
             
-        response += (
-            "⚠️ _Not Financial Advice._\n"
-            "_Edukasi & Sharing Analisa Pribadi._\n"
-            "_Do your own research (DYOR)._"
-        )
-        
-        # Update status and send chart
-        await status_message.edit_text("📈 *Analisis selesai. Sedang memproses grafik...*", parse_mode="Markdown")
-        
-        chart_path = "chart.png"
-        chart_generated = False
-        try:
-            generate_candlestick_chart(
-                df=analyzer.df_h1,
-                zones=zones,
-                current_price=current_price,
-                pivots=analyzer.pivots,
-                symbol=config.MT5_SYMBOL,
-                timeframe="H1",
-                save_path=chart_path
-            )
-            chart_generated = True
-        except Exception as chart_err:
-            logger.error(f"Failed to generate chart: {chart_err}")
+            # Setup specific button for this zone
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton(f"💼 Open Setup {idx+1}", callback_data=f"place_order_{idx}")
+            ]])
             
-        # Show Open Position button
-        reply_markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton("💼 Open Position", callback_data="btn_open_position")
-        ]])
-
-        if chart_generated and os.path.exists(chart_path):
+            chart_path = f"chart_{idx}.png"
+            chart_generated = False
             try:
-                # Delete loading status message to keep chat tidy
-                await status_message.delete()
-            except Exception:
-                pass
-
-            try:
-                with open(chart_path, 'rb') as photo:
-                    if len(response) <= 1024:
-                        # Send chart with full text as caption in a single premium message
+                # Generate chart containing only this single zone
+                generate_candlestick_chart(
+                    df=analyzer.df_h1,
+                    zones=[zone],
+                    current_price=current_price,
+                    pivots=analyzer.pivots,
+                    symbol=config.MT5_SYMBOL,
+                    timeframe="H1",
+                    save_path=chart_path
+                )
+                chart_generated = True
+            except Exception as chart_err:
+                logger.error(f"Failed to generate chart for zone {idx+1}: {chart_err}")
+                
+            if chart_generated and os.path.exists(chart_path):
+                try:
+                    with open(chart_path, 'rb') as photo:
                         await update.message.reply_photo(
                             photo=photo,
-                            caption=response,
+                            caption=zone_text,
                             parse_mode="Markdown",
                             reply_markup=reply_markup
                         )
-                    else:
-                        # Caption is too long, send photo first and reply with full text
-                        photo_msg = await update.message.reply_photo(
-                            photo=photo,
-                            caption=f"📈 Chart Analisis {config.MT5_SYMBOL} (H1)"
-                        )
-                        await photo_msg.reply_text(
-                            response,
-                            parse_mode="Markdown",
-                            reply_markup=reply_markup
-                        )
-            except Exception as send_err:
-                logger.error(f"Failed to send chart photo: {send_err}")
-                # Fallback to text message
-                await update.message.reply_text(response, parse_mode="Markdown", reply_markup=reply_markup)
-            finally:
-                # Clean up local file
-                if os.path.exists(chart_path):
-                    os.remove(chart_path)
-        else:
-            # Fallback if chart failed to generate
-            await status_message.edit_text(response, parse_mode="Markdown", reply_markup=reply_markup)
+                except Exception as send_err:
+                    logger.error(f"Failed to send zone {idx+1} photo: {send_err}")
+                    await update.message.reply_text(zone_text, parse_mode="Markdown", reply_markup=reply_markup)
+                finally:
+                    if os.path.exists(chart_path):
+                        os.remove(chart_path)
+            else:
+                await update.message.reply_text(zone_text, parse_mode="Markdown", reply_markup=reply_markup)
+                
+        # Update loading message to complete summary
+        try:
+            await status_message.edit_text(
+                f"✅ **Scanning Selesai.**\n"
+                f"Ditemukan **{len(zones)}** area entry potensial. Silakan periksa detail grafik dan pasang posisi menggunakan tombol di atas.",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
 
 
     except Exception as e:
@@ -217,7 +202,7 @@ async def execute_trade_for_zone(chat_id: int, zone, message_object):
         dp.disconnect()
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callback queries (e.g. Open Position)."""
+    """Handle button callback queries (e.g. place_order_0)."""
     query = update.callback_query
     await query.answer()
     
@@ -228,51 +213,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("❌ *Tidak ditemukan data scan terakhir. Silakan jalankan perintah /scan terlebih dahulu.*", parse_mode="Markdown")
         return
         
-    if len(zones) == 1:
-        # Only 1 zone, execute immediately
-        await execute_trade_for_zone(chat_id, zones[0], query.message)
-    else:
-        # Multiple zones, ask the user to select one
-        user_states[chat_id] = {"action": "waiting_for_zone_number"}
-        await query.message.reply_text(
-            f"🔍 *Ditemukan {len(zones)} area entry potensial.*\n"
-            f"Silakan ketik atau balas pesan ini dengan nomor urutan area entry yang ingin Anda buka (contoh: `1` atau `2`):",
-            parse_mode="Markdown"
-        )
-
-async def handle_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text responses when the user is prompted to select a zone."""
-    chat_id = update.effective_chat.id
-    state = user_states.get(chat_id)
-    
-    if not state or state.get("action") != "waiting_for_zone_number":
-        # Ignore random messages
-        return
-        
-    zones = last_scanned_zones.get(chat_id, [])
-    if not zones:
-        user_states.pop(chat_id, None)
-        return
-        
-    text = update.message.text.strip()
-    try:
-        num = int(text)
-        if 1 <= num <= len(zones):
-            selected_zone = zones[num - 1]
-            # Clear state
-            user_states.pop(chat_id, None)
-            # Execute
-            await execute_trade_for_zone(chat_id, selected_zone, update.message)
-        else:
-            await update.message.reply_text(
-                f"⚠️ *Nomor tidak valid.* Silakan masukkan angka dari `1` hingga `{len(zones)}` sesuai dengan nomor setup di atas:",
-                parse_mode="Markdown"
-            )
-    except ValueError:
-        await update.message.reply_text(
-            f"⚠️ *Format salah.* Harap ketikkan angka bulat saja (contoh: `1` atau `{len(zones)}`):",
-            parse_mode="Markdown"
-        )
+    data = query.data
+    if data.startswith("place_order_"):
+        try:
+            idx = int(data.split("_")[-1])
+            if 0 <= idx < len(zones):
+                selected_zone = zones[idx]
+                await execute_trade_for_zone(chat_id, selected_zone, query.message)
+            else:
+                await query.message.reply_text("❌ *Indeks zona tidak valid atau data scan sudah usang.*", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error parsing callback data: {e}")
+            await query.message.reply_text("❌ *Gagal memproses eksekusi order.*", parse_mode="Markdown")
 
 def main():
     # Verify token
@@ -290,8 +242,7 @@ def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("scan", scan))
-    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^btn_open_position$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_reply))
+    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^place_order_\\d+$"))
 
     # Run the bot
     application.run_polling()
