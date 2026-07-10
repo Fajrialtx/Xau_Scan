@@ -26,6 +26,11 @@ class MockDataProvider:
     def get_current_price(self):
         return self.current_price
 
+    def place_limit_order(self, order_type: str, price: float, sl: float, tp: float, volume: float = None) -> tuple[bool, str]:
+        import random
+        return True, f"Mock Order Successful! Ticket: {random.randint(1000000, 9999999)}"
+
+
     def generate_mock_candles(self, timeframe: str, count: int) -> pd.DataFrame:
         """Generate realistic synthetic candle data for testing analysis logic."""
         now = datetime.utcnow()

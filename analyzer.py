@@ -167,34 +167,24 @@ class XAUAnalyzer:
 
     def get_asia_session_range(self, df_m15: pd.DataFrame):
         """
-        Find highest high and lowest low of Asia session today.
+        Find highest high and lowest low of Asia session.
         Time: 07:00 to 15:00 WIB (Jakarta Time).
         """
         # Convert df timestamps to Jakarta timezone
         df = df_m15.copy()
         df['time_local'] = df['time'].dt.tz_localize('UTC').dt.tz_convert(self.tz)
         
-        # Filter for today's Asia session
-        today = datetime.now(self.tz).date()
-        
-        asia_df = df[
-            (df['time_local'].dt.date == today) & 
+        # Filter all historical bars that fall into the Asia session hour range
+        asia_hours_df = df[
             (df['time_local'].dt.hour >= config.ASIA_START_HOUR) & 
             (df['time_local'].dt.hour < config.ASIA_END_HOUR)
         ]
         
-        if len(asia_df) == 0:
-            # Fallback to yesterday's Asia session if today's is not yet populated or active
-            # (e.g. if scan is run early in the morning before 15:00 or 07:00)
-            logger.info("Today's Asia session data not complete. Checking latest available session...")
-            last_date = df['time_local'].dt.date.max()
-            asia_df = df[
-                (df['time_local'].dt.date == last_date) & 
-                (df['time_local'].dt.hour >= config.ASIA_START_HOUR) & 
-                (df['time_local'].dt.hour < config.ASIA_END_HOUR)
-            ]
-
-        if len(asia_df) > 0:
+        if len(asia_hours_df) > 0:
+            # Get the latest date that actually has Asia session data
+            last_asia_date = asia_hours_df['time_local'].dt.date.max()
+            asia_df = asia_hours_df[asia_hours_df['time_local'].dt.date == last_asia_date]
+            
             asia_high = asia_df['high'].max()
             asia_low = asia_df['low'].min()
             return asia_high, asia_low

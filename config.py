@@ -8,7 +8,10 @@ def load_env():
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
                     k, v = line.split("=", 1)
-                    os.environ[k.strip()] = v.strip()
+                    val = v.strip()
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        val = val[1:-1]
+                    os.environ[k.strip()] = val
 
 # Load env variables
 load_env()
@@ -20,6 +23,8 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 # MT5 Connection Configuration
 # Leave empty for default path, or specify the path to terminal.exe if needed
 MT5_TERMINAL_PATH = os.environ.get("MT5_TERMINAL_PATH", "")
+DEFAULT_LOT = float(os.environ.get("DEFAULT_LOT", "0.01"))
+
 MT5_SYMBOL = os.environ.get("MT5_SYMBOL", "XAUUSD")
 
 # Analysis Configuration

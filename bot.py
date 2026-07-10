@@ -1,8 +1,8 @@
 import logging
 import asyncio
 import os
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import config
 from data_provider import MT5DataProvider
 from analyzer import XAUAnalyzer
@@ -11,6 +11,10 @@ from chart_generator import generate_candlestick_chart
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# In-memory storage for scan state
+last_scanned_zones = {}  # chat_id -> list of TradingZone
+user_states = {}         # chat_id -> dict
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /start command."""
@@ -46,6 +50,9 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Analyze
         analyzer = XAUAnalyzer(dp)
         zones = analyzer.analyze()
+        
+        # Store scanned zones for potential execution
+        last_scanned_zones[update.effective_chat.id] = zones
         
         # Disconnect after fetching/analyzing to be clean
         dp.disconnect()
@@ -120,7 +127,11 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as chart_err:
             logger.error(f"Failed to generate/send chart: {chart_err}")
             
-        await status_message.edit_text(response, parse_mode="Markdown")
+        # Show Open Position button
+        reply_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("💼 Open Position", callback_data="btn_open_position")
+        ]])
+        await status_message.edit_text(response, parse_mode="Markdown", reply_markup=reply_markup)
 
     except Exception as e:
         logger.exception("Error during /scan command execution")
@@ -129,6 +140,103 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ **Terjadi Kesalahan saat Pemindaian!**\n\n"
             f"Error: `{str(e)}`\n"
             "Pastikan MT5 Anda sudah login ke akun broker dan memiliki chart data XAUUSD.",
+            parse_mode="Markdown"
+        )
+
+async def execute_trade_for_zone(chat_id: int, zone, message_object):
+    """Connect to MT5 and execute a pending limit order for a given zone."""
+    status_msg = await message_object.reply_text(
+        f"⏳ *Mengirim order pending {zone.zone_type} Limit ke MT5...*",
+        parse_mode="Markdown"
+    )
+    
+    # Determine entry price
+    entry_price = zone.top if zone.zone_type == "BUY" else zone.bottom
+    
+    dp = MT5DataProvider()
+    try:
+        success, msg = dp.place_limit_order(
+            order_type=zone.zone_type,
+            price=entry_price,
+            sl=zone.sl,
+            tp=zone.tp1,
+            volume=config.DEFAULT_LOT
+        )
+        
+        emoji = "✅" if success else "❌"
+        result_text = (
+            f"{emoji} **STATUS EKSEKUSI PENDING ORDER**\n"
+            f"----------------------------------------\n"
+            f"• Simbol: **{config.MT5_SYMBOL}**\n"
+            f"• Tipe: **{zone.zone_type} LIMIT**\n"
+            f"• Volume: **{config.DEFAULT_LOT} Lot**\n"
+            f"• Price: **{entry_price:.2f}**\n"
+            f"• SL: **{zone.sl:.2f}**\n"
+            f"• TP: **{zone.tp1:.2f}**\n\n"
+            f"💬 *Respon:* {msg}"
+        )
+        await status_msg.edit_text(result_text, parse_mode="Markdown")
+    except Exception as e:
+        logger.exception("Error executing limit order")
+        await status_msg.edit_text(f"❌ **Gagal mengeksekusi order!**\nError: `{str(e)}`", parse_mode="Markdown")
+    finally:
+        dp.disconnect()
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callback queries (e.g. Open Position)."""
+    query = update.callback_query
+    await query.answer()
+    
+    chat_id = update.effective_chat.id
+    zones = last_scanned_zones.get(chat_id, [])
+    
+    if not zones:
+        await query.message.reply_text("❌ *Tidak ditemukan data scan terakhir. Silakan jalankan perintah /scan terlebih dahulu.*", parse_mode="Markdown")
+        return
+        
+    if len(zones) == 1:
+        # Only 1 zone, execute immediately
+        await execute_trade_for_zone(chat_id, zones[0], query.message)
+    else:
+        # Multiple zones, ask the user to select one
+        user_states[chat_id] = {"action": "waiting_for_zone_number"}
+        await query.message.reply_text(
+            f"🔍 *Ditemukan {len(zones)} area entry potensial.*\n"
+            f"Silakan ketik atau balas pesan ini dengan nomor urutan area entry yang ingin Anda buka (contoh: `1` atau `2`):",
+            parse_mode="Markdown"
+        )
+
+async def handle_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text responses when the user is prompted to select a zone."""
+    chat_id = update.effective_chat.id
+    state = user_states.get(chat_id)
+    
+    if not state or state.get("action") != "waiting_for_zone_number":
+        # Ignore random messages
+        return
+        
+    zones = last_scanned_zones.get(chat_id, [])
+    if not zones:
+        user_states.pop(chat_id, None)
+        return
+        
+    text = update.message.text.strip()
+    try:
+        num = int(text)
+        if 1 <= num <= len(zones):
+            selected_zone = zones[num - 1]
+            # Clear state
+            user_states.pop(chat_id, None)
+            # Execute
+            await execute_trade_for_zone(chat_id, selected_zone, update.message)
+        else:
+            await update.message.reply_text(
+                f"⚠️ *Nomor tidak valid.* Silakan masukkan angka dari `1` hingga `{len(zones)}` sesuai dengan nomor setup di atas:",
+                parse_mode="Markdown"
+            )
+    except ValueError:
+        await update.message.reply_text(
+            f"⚠️ *Format salah.* Harap ketikkan angka bulat saja (contoh: `1` atau `{len(zones)}`):",
             parse_mode="Markdown"
         )
 
@@ -148,6 +256,8 @@ def main():
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("scan", scan))
+    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^btn_open_position$"))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_reply))
 
     # Run the bot
     application.run_polling()
