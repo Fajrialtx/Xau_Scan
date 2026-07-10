@@ -103,9 +103,10 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Update status and send chart
-        await status_message.edit_text("📈 *Analisis selesai. Sedang menggambar grafik...*", parse_mode="Markdown")
+        await status_message.edit_text("📈 *Analisis selesai. Sedang memproses grafik...*", parse_mode="Markdown")
         
         chart_path = "chart.png"
+        chart_generated = False
         try:
             generate_candlestick_chart(
                 df=analyzer.df_h1,
@@ -116,22 +117,55 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 timeframe="H1",
                 save_path=chart_path
             )
-            
-            # Send the generated chart photo
-            with open(chart_path, 'rb') as photo:
-                await update.message.reply_photo(photo=photo, caption=f"📈 Chart Analisis {config.MT5_SYMBOL} (H1)")
-                
-            # Clean up local file
-            if os.path.exists(chart_path):
-                os.remove(chart_path)
+            chart_generated = True
         except Exception as chart_err:
-            logger.error(f"Failed to generate/send chart: {chart_err}")
+            logger.error(f"Failed to generate chart: {chart_err}")
             
         # Show Open Position button
         reply_markup = InlineKeyboardMarkup([[
             InlineKeyboardButton("💼 Open Position", callback_data="btn_open_position")
         ]])
-        await status_message.edit_text(response, parse_mode="Markdown", reply_markup=reply_markup)
+
+        if chart_generated and os.path.exists(chart_path):
+            try:
+                # Delete loading status message to keep chat tidy
+                await status_message.delete()
+            except Exception:
+                pass
+
+            try:
+                with open(chart_path, 'rb') as photo:
+                    if len(response) <= 1024:
+                        # Send chart with full text as caption in a single premium message
+                        await update.message.reply_photo(
+                            photo=photo,
+                            caption=response,
+                            parse_mode="Markdown",
+                            reply_markup=reply_markup
+                        )
+                    else:
+                        # Caption is too long, send photo first and reply with full text
+                        photo_msg = await update.message.reply_photo(
+                            photo=photo,
+                            caption=f"📈 Chart Analisis {config.MT5_SYMBOL} (H1)"
+                        )
+                        await photo_msg.reply_text(
+                            response,
+                            parse_mode="Markdown",
+                            reply_markup=reply_markup
+                        )
+            except Exception as send_err:
+                logger.error(f"Failed to send chart photo: {send_err}")
+                # Fallback to text message
+                await update.message.reply_text(response, parse_mode="Markdown", reply_markup=reply_markup)
+            finally:
+                # Clean up local file
+                if os.path.exists(chart_path):
+                    os.remove(chart_path)
+        else:
+            # Fallback if chart failed to generate
+            await status_message.edit_text(response, parse_mode="Markdown", reply_markup=reply_markup)
+
 
     except Exception as e:
         logger.exception("Error during /scan command execution")

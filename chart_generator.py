@@ -6,6 +6,11 @@ import matplotlib.patches as patches
 import pandas as pd
 import numpy as np
 import os
+import logging
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
 
 def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: float, pivots: dict, symbol: str, timeframe: str = "H1", save_path: str = "chart.png"):
     """

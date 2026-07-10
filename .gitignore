@@ -17,3 +17,7 @@ ENV/
 *.njsproj
 *.sln
 *.swp
+
+# Generated charts
+chart.png
+
