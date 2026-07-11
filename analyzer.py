@@ -518,4 +518,75 @@ class XAUAnalyzer:
 
         # Sort zones by score descending
         valid_zones.sort(key=lambda z: z.score, reverse=True)
-        return valid_zones
+        # Merge overlapping zones (MTF Refinement)
+        merged_zones = self.merge_overlapping_zones(valid_zones)
+        return merged_zones
+
+    def is_overlapping(self, zone_a, zone_b) -> bool:
+        """Check if two zones overlap by 50% or more of the smaller zone."""
+        if zone_a.zone_type != zone_b.zone_type:
+            return False
+            
+        overlap_bottom = max(zone_a.bottom, zone_b.bottom)
+        overlap_top = min(zone_a.top, zone_b.top)
+        
+        if overlap_top <= overlap_bottom:
+            return False
+            
+        overlap_height = overlap_top - overlap_bottom
+        height_a = zone_a.top - zone_a.bottom
+        height_b = zone_b.top - zone_b.bottom
+        
+        min_height = min(height_a, height_b)
+        if min_height <= 0:
+            return False
+            
+        overlap_ratio = overlap_height / min_height
+        return overlap_ratio >= 0.5
+
+    def merge_overlapping_zones(self, zones: list) -> list:
+        """Merge overlapping zones, keeping the HTF/higher score zone and adding confirmation score."""
+        if not zones:
+            return []
+            
+        merged = []
+        used_indices = set()
+        
+        # Sort by timeframe priority (H4 first, then H1) and then score descending
+        def sort_key(z):
+            tf_weight = 2 if z.timeframe == "H4" else 1
+            return (tf_weight, z.score)
+            
+        sorted_zones = sorted(zones, key=sort_key, reverse=True)
+        
+        for i, zone_a in enumerate(sorted_zones):
+            if i in used_indices:
+                continue
+                
+            primary_zone = zone_a
+            has_refinement = False
+            refined_timeframes = {zone_a.timeframe}
+            
+            for j in range(i + 1, len(sorted_zones)):
+                if j in used_indices:
+                    continue
+                zone_b = sorted_zones[j]
+                
+                if self.is_overlapping(primary_zone, zone_b):
+                    used_indices.add(j)
+                    has_refinement = True
+                    refined_timeframes.add(zone_b.timeframe)
+            
+            if has_refinement and len(refined_timeframes) > 1:
+                # Add +1.0 for multi-timeframe confirmation
+                primary_zone.score += 1.0
+                detail_msg = f"Multi-Timeframe Confirmation ({', '.join(sorted(refined_timeframes))}) (+1.0)"
+                if detail_msg not in primary_zone.details:
+                    primary_zone.details.append(detail_msg)
+                    
+            merged.append(primary_zone)
+            
+        # Re-sort final list by score descending
+        merged.sort(key=lambda z: z.score, reverse=True)
+        return merged
+
