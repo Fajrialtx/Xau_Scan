@@ -8,10 +8,11 @@ import config
 logger = logging.getLogger(__name__)
 
 class TradingZone:
-    def __init__(self, zone_type: str, top: float, bottom: float, timeframe: str):
+    def __init__(self, zone_type: str, top: float, bottom: float, timeframe: str, decimals: int = 2):
         self.zone_type = zone_type  # "BUY" or "SELL"
-        self.top = round(top, 2)
-        self.bottom = round(bottom, 2)
+        self.decimals = decimals
+        self.top = round(top, decimals)
+        self.bottom = round(bottom, decimals)
         self.timeframe = timeframe
         self.score = 0.0
         self.details = []
@@ -27,15 +28,62 @@ class TradingZone:
             "timeframe": self.timeframe,
             "score": round(self.score, 2),
             "details": self.details,
-            "sl": round(self.sl, 2),
-            "tp1": round(self.tp1, 2),
-            "tp2": round(self.tp2, 2)
+            "sl": round(self.sl, self.decimals),
+            "tp1": round(self.tp1, self.decimals),
+            "tp2": round(self.tp2, self.decimals)
         }
 
 class XAUAnalyzer:
     def __init__(self, data_provider):
         self.dp = data_provider
         self.tz = pytz.timezone(config.TIMEZONE_STR)
+        self.params = self.get_symbol_params(self.dp.symbol)
+
+    def get_symbol_params(self, symbol: str) -> dict:
+        sym = symbol.upper()
+        if "XAU" in sym or "GOLD" in sym:
+            return {
+                "impulsive_threshold": 5.0,
+                "zone_limit_range": 30.0,
+                "buffer": 3.5,
+                "decimals": 2
+            }
+        elif "EUR" in sym:
+            return {
+                "impulsive_threshold": 0.0015,
+                "zone_limit_range": 0.0150,
+                "buffer": 0.0010,
+                "decimals": 5
+            }
+        elif "GBP" in sym:
+            return {
+                "impulsive_threshold": 0.0020,
+                "zone_limit_range": 0.0200,
+                "buffer": 0.0012,
+                "decimals": 5
+            }
+        elif "JPY" in sym:
+            return {
+                "impulsive_threshold": 0.25,
+                "zone_limit_range": 2.50,
+                "buffer": 0.15,
+                "decimals": 3
+            }
+        elif "BTC" in sym:
+            return {
+                "impulsive_threshold": 150.0,
+                "zone_limit_range": 1500.0,
+                "buffer": 100.0,
+                "decimals": 2
+            }
+        else:
+            return {
+                "impulsive_threshold": 5.0,
+                "zone_limit_range": 30.0,
+                "buffer": 3.5,
+                "decimals": 2
+            }
+
 
     def calculate_ema(self, df: pd.DataFrame, period: int) -> pd.Series:
         """Calculate Exponential Moving Average."""
@@ -77,8 +125,9 @@ class XAUAnalyzer:
         if n < 10:
             return obs
 
-        # Threshold for strong impulsive move (in points/pips, e.g. 5.0 USD for Gold)
-        impulsive_threshold = 5.0
+        # Threshold for strong impulsive move (in points/pips)
+        impulsive_threshold = self.params["impulsive_threshold"]
+        decimals = self.params["decimals"]
 
         for i in range(2, n - 4):
             # Bullish OB Check
@@ -99,7 +148,7 @@ class XAUAnalyzer:
                             break
                     
                     if not mitigated:
-                        obs.append(TradingZone("BUY", ob_top, ob_bottom, timeframe))
+                        obs.append(TradingZone("BUY", ob_top, ob_bottom, timeframe, decimals))
 
             # Bearish OB Check
             # 1. Candle i is bullish
@@ -119,9 +168,10 @@ class XAUAnalyzer:
                             break
                             
                     if not mitigated:
-                        obs.append(TradingZone("SELL", ob_top, ob_bottom, timeframe))
+                        obs.append(TradingZone("SELL", ob_top, ob_bottom, timeframe, decimals))
                         
         return obs
+
 
     def detect_fvgs(self, df: pd.DataFrame, timeframe: str):
         """
@@ -133,6 +183,8 @@ class XAUAnalyzer:
         n = len(df)
         if n < 5:
             return fvgs
+
+        decimals = self.params["decimals"]
 
         for i in range(2, n):
             # Bullish FVG
@@ -147,7 +199,7 @@ class XAUAnalyzer:
                             mitigated = True
                             break
                     if not mitigated:
-                        fvgs.append(TradingZone("BUY", fvg_top, fvg_bottom, timeframe))
+                        fvgs.append(TradingZone("BUY", fvg_top, fvg_bottom, timeframe, decimals))
 
             # Bearish FVG
             if df['close'].iloc[i-1] < df['open'].iloc[i-1]:  # Candle i-1 is bearish
@@ -161,9 +213,10 @@ class XAUAnalyzer:
                             mitigated = True
                             break
                     if not mitigated:
-                        fvgs.append(TradingZone("SELL", fvg_top, fvg_bottom, timeframe))
+                        fvgs.append(TradingZone("SELL", fvg_top, fvg_bottom, timeframe, decimals))
 
         return fvgs
+
 
     def get_asia_session_range(self, df_m15: pd.DataFrame):
         """
@@ -321,8 +374,11 @@ class XAUAnalyzer:
         
         valid_zones = []
         
-        # We only consider zones within $30 (300 pips) range of current price to be realistic
-        zone_limit_range = 30.0
+        # We only consider zones within range of current price to be realistic
+        zone_limit_range = self.params["zone_limit_range"]
+        fvg_overlap_tol = 0.6 * self.params["buffer"]
+        fib_tol = 0.3 * self.params["buffer"]
+        pivot_tol = 0.4 * self.params["buffer"]
         
         for zone in all_obs:
             # Filter by distance
@@ -347,12 +403,12 @@ class XAUAnalyzer:
                     # Check overlap: if FVG top/bottom is close to OB top/bottom
                     # Bullish overlap: FVG bottom is near OB top
                     if zone.zone_type == "BUY":
-                        if abs(fvg.bottom - zone.top) <= 2.0 or (fvg.bottom <= zone.top and fvg.top >= zone.bottom):
+                        if abs(fvg.bottom - zone.top) <= fvg_overlap_tol or (fvg.bottom <= zone.top and fvg.top >= zone.bottom):
                             has_overlapping_fvg = True
                             break
                     # Bearish overlap: FVG top is near OB bottom
                     elif zone.zone_type == "SELL":
-                        if abs(fvg.top - zone.bottom) <= 2.0 or (fvg.top >= zone.bottom and fvg.bottom <= zone.top):
+                        if abs(fvg.top - zone.bottom) <= fvg_overlap_tol or (fvg.top >= zone.bottom and fvg.bottom <= zone.top):
                             has_overlapping_fvg = True
                             break
             
@@ -371,7 +427,7 @@ class XAUAnalyzer:
                     fib_786 = swing_high - 0.786 * fib_range
                     
                     # Check if fib levels lie inside or close to the OB zone
-                    if (zone.bottom - 1.0 <= fib_618 <= zone.top + 1.0) or (zone.bottom - 1.0 <= fib_786 <= zone.top + 1.0):
+                    if (zone.bottom - fib_tol <= fib_618 <= zone.top + fib_tol) or (zone.bottom - fib_tol <= fib_786 <= zone.top + fib_tol):
                         zone.score += 2.0
                         zone.details.append("Fibonacci Retracement (61.8% / 78.6%) overlap (+2.0)")
                 else:
@@ -379,7 +435,7 @@ class XAUAnalyzer:
                     fib_618 = swing_low + 0.618 * fib_range
                     fib_786 = swing_low + 0.786 * fib_range
                     
-                    if (zone.bottom - 1.0 <= fib_618 <= zone.top + 1.0) or (zone.bottom - 1.0 <= fib_786 <= zone.top + 1.0):
+                    if (zone.bottom - fib_tol <= fib_618 <= zone.top + fib_tol) or (zone.bottom - fib_tol <= fib_786 <= zone.top + fib_tol):
                         zone.score += 2.0
                         zone.details.append("Fibonacci Retracement (61.8% / 78.6%) overlap (+2.0)")
             
@@ -388,11 +444,11 @@ class XAUAnalyzer:
             if pivots:
                 # Check proximity to daily PP, S1 (for BUY), R1 (for SELL)
                 target_pivot = pivots["S1"] if zone.zone_type == "BUY" else pivots["R1"]
-                if abs((zone.top + zone.bottom)/2.0 - pivots["PP"]) <= 1.5 or abs((zone.top + zone.bottom)/2.0 - target_pivot) <= 1.5:
+                if abs((zone.top + zone.bottom)/2.0 - pivots["PP"]) <= pivot_tol or abs((zone.top + zone.bottom)/2.0 - target_pivot) <= pivot_tol:
                     near_pivot_or_vwap = True
             
             if vwap:
-                if abs((zone.top + zone.bottom)/2.0 - vwap) <= 1.5:
+                if abs((zone.top + zone.bottom)/2.0 - vwap) <= pivot_tol:
                     near_pivot_or_vwap = True
                     
             if near_pivot_or_vwap:
@@ -426,11 +482,11 @@ class XAUAnalyzer:
             is_asia_sweep = False
             if zone.zone_type == "BUY" and asia_low:
                 # Buy zone is slightly below Asia Low (liquidity hunt)
-                if zone.top <= asia_low and (asia_low - zone.top) <= 3.5:
+                if zone.top <= asia_low and (asia_low - zone.top) <= self.params["buffer"]:
                     is_asia_sweep = True
             elif zone.zone_type == "SELL" and asia_high:
                 # Sell zone is slightly above Asia High
-                if zone.bottom >= asia_high and (zone.bottom - asia_high) <= 3.5:
+                if zone.bottom >= asia_high and (zone.bottom - asia_high) <= self.params["buffer"]:
                     is_asia_sweep = True
                     
             if is_asia_sweep:
@@ -445,8 +501,7 @@ class XAUAnalyzer:
             # Check if zone meets minimum score threshold
             if zone.score >= config.MIN_SCORE_SHOW:
                 # Calculate SL & TP
-                # Gold typical ATR/buffer is about 3.5 USD (35 pips)
-                buffer = 3.5
+                buffer = self.params["buffer"]
                 if zone.zone_type == "BUY":
                     zone.sl = zone.bottom - buffer
                     risk = zone.top - zone.sl
@@ -459,6 +514,7 @@ class XAUAnalyzer:
                     zone.tp2 = zone.bottom - 3.0 * risk
                     
                 valid_zones.append(zone)
+
 
         # Sort zones by score descending
         valid_zones.sort(key=lambda z: z.score, reverse=True)

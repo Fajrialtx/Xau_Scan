@@ -13,9 +13,11 @@ import config
 from analyzer import XAUAnalyzer
 
 class MockDataProvider:
-    def __init__(self, current_price=2350.0):
+    def __init__(self, symbol: str = None, current_price=2350.0):
+        self.symbol = symbol if symbol else config.MT5_SYMBOL
         self.current_price = current_price
         self.tz = pytz.timezone(config.TIMEZONE_STR)
+
 
     def connect(self):
         return True

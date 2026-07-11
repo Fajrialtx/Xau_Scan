@@ -12,7 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: float, pivots: dict, symbol: str, timeframe: str = "H1", save_path: str = "chart.png"):
+def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: float, pivots: dict, symbol: str, timeframe: str = "H1", save_path: str = "chart.png", decimals: int = 2):
     """
     Generate a beautiful TradingView-style dark-themed candlestick chart.
     Highlights Order Blocks, EMA lines, Pivot Points, and current price.
@@ -34,6 +34,10 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
         
     df_plot = df.tail(plot_len).copy().reset_index(drop=True)
 
+    # Dynamic format string and minimum height
+    f_str = f"{{:.{decimals}f}}"
+    min_body_height = 0.5 * (10 ** -decimals)
+
     # Plot Candlesticks
     for i in range(len(df_plot)):
         row = df_plot.iloc[i]
@@ -45,7 +49,7 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
         
         # Body
         body_bottom = min(row['open'], row['close'])
-        body_height = max(abs(row['open'] - row['close']), 0.05) # Min height to show flat candles
+        body_height = max(abs(row['open'] - row['close']), min_body_height)
         rect = patches.Rectangle(
             (i - 0.3, body_bottom), 0.6, body_height,
             facecolor=color, edgecolor=color, linewidth=1, zorder=3
@@ -58,7 +62,7 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
 
     # Draw current price line
     ax.axhline(current_price, color='#2962ff', linestyle='--', linewidth=1.2, alpha=0.8, zorder=5)
-    ax.text(plot_len - 1, current_price, f" Live: {current_price:.2f}", color='#ffffff', 
+    ax.text(plot_len - 1, current_price, f" Live: {f_str.format(current_price)}", color='#ffffff', 
             bbox=dict(facecolor='#2962ff', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.2'),
             fontsize=8, va='center', zorder=6)
 
@@ -73,7 +77,7 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
             level = pivots.get(key)
             if level and (df_plot['low'].min() * 0.99 <= level <= df_plot['high'].max() * 1.01):
                 ax.axhline(level, color=color, linestyle=':', linewidth=1.0, alpha=0.6, zorder=2)
-                ax.text(0.5, level, f" {name}: {level:.2f}", color=color, alpha=0.8,
+                ax.text(0.5, level, f" {name}: {f_str.format(level)}", color=color, alpha=0.8,
                         fontsize=7.5, va='bottom', ha='left', zorder=2)
 
     # Highlight entry zones
@@ -95,7 +99,7 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
         
         # Text label inside the zone
         y_text = (zone.top + zone.bottom) / 2.0
-        ax.text(5, y_text, f" {label_text} [{zone.bottom:.1f} - {zone.top:.1f}]", 
+        ax.text(5, y_text, f" {label_text} [{f_str.format(zone.bottom)} - {f_str.format(zone.top)}]", 
                 color=zone_color, fontsize=8.5, fontweight='bold', va='center', alpha=0.85, zorder=2)
 
     # Watermark text (Timeframe & Symbol) in background
@@ -123,7 +127,7 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
     ax.set_xticklabels(x_labels)
 
     # Labels and Legend
-    plt.title(f"XAU/USD Analytical Chart ({timeframe})", color='#ffffff', fontsize=12, pad=15, loc='left', fontweight='bold')
+    plt.title(f"{symbol} Analytical Chart ({timeframe})", color='#ffffff', fontsize=12, pad=15, loc='left', fontweight='bold')
     plt.legend(facecolor='#1e222d', edgecolor='#2a2e39', labelcolor='#ffffff', loc='upper left', fontsize=9)
 
     # Set tight limits to avoid whitespace
@@ -133,5 +137,6 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
     plt.tight_layout()
     plt.savefig(save_path, facecolor='#131722', edgecolor='none', dpi=150)
     plt.close()
+
     
     logger.info(f"Chart generated successfully and saved to {save_path}")

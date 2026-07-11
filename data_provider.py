@@ -10,10 +10,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class MT5DataProvider:
-    def __init__(self):
-        self.symbol = config.MT5_SYMBOL
+    def __init__(self, symbol: str = None):
+        self.symbol = symbol if symbol else config.MT5_SYMBOL
         self.terminal_path = config.MT5_TERMINAL_PATH
         self.connected = False
+
 
     def connect(self) -> bool:
         """Initialize connection to MetaTrader 5."""

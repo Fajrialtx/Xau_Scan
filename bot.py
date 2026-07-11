@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import config
 from data_provider import MT5DataProvider
@@ -19,20 +19,32 @@ last_scanned_zones = {}  # chat_id -> list of TradingZone
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /start command."""
     welcome_msg = (
-        "👋 **Halo! Selamat datang di Bot Analisis XAU/USD**\n\n"
+        "👋 <b>Halo! Selamat datang di Bot Analisis MT5 Multi-Pair</b>\n\n"
         "Saya adalah bot personal asisten trading Anda. Saya terhubung ke terminal MT5 Anda "
         "untuk menganalisis area entry ideal berdasarkan Smart Money Concepts (OB, FVG) "
         "dan konfluensi teknikal.\n\n"
-        "**Perintah Tersedia:**\n"
-        "🔍 /scan - Memulai pemindaian pergerakan XAU/USD saat ini."
+        "<b>Perintah Tersedia:</b>\n"
+        "🔍 /scan_xau - Pemindaian Emas (XAU/USD)\n"
+        "🔍 /scan_eur - Pemindaian EUR/USD\n"
+        "🔍 /scan_gbp - Pemindaian GBP/USD\n"
+        "🔍 /scan_jpy - Pemindaian USD/JPY\n"
+        "🔍 /scan_btc - Pemindaian BTC/USD"
     )
-    await update.message.reply_text(welcome_msg, parse_mode="Markdown")
+    await update.message.reply_text(welcome_msg, parse_mode="HTML")
 
-async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for the /scan command."""
-    status_message = await update.message.reply_text("🔍 *Memulai pemindaian pasar XAU/USD... Mohon tunggu.*", parse_mode="Markdown")
+
+async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TYPE, pair_key: str):
+    symbol = config.SUPPORTED_PAIRS.get(pair_key)
+    if not symbol:
+        await update.message.reply_text("❌ *Pair tidak didukung.*", parse_mode="Markdown")
+        return
+        
+    status_message = await update.message.reply_text(
+        f"🔍 *Memulai pemindaian pasar {symbol}... Mohon tunggu.*", 
+        parse_mode="Markdown"
+    )
     
-    dp = MT5DataProvider()
+    dp = MT5DataProvider(symbol=symbol)
     try:
         # Connect to MT5
         connected = dp.connect()
@@ -51,16 +63,22 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analyzer = XAUAnalyzer(dp)
         zones = analyzer.analyze()
         
-        # Store scanned zones for potential execution
-        last_scanned_zones[update.effective_chat.id] = zones
+        # Get dynamic format string
+        decimals = analyzer.params["decimals"]
+        f_str = f"{{:.{decimals}f}}"
+        
+        # Store scanned zones nested under symbol
+        if update.effective_chat.id not in last_scanned_zones:
+            last_scanned_zones[update.effective_chat.id] = {}
+        last_scanned_zones[update.effective_chat.id][symbol] = zones
         
         # Disconnect after fetching/analyzing to be clean
         dp.disconnect()
         
         if not zones:
             await status_message.edit_text(
-                f"📊 **HASIL SCANNING {config.MT5_SYMBOL}**\n"
-                f"Harga Saat Ini: **{current_price:.2f}**\n\n"
+                f"📊 **HASIL SCANNING {symbol}**\n"
+                f"Harga Saat Ini: **{f_str.format(current_price)}**\n\n"
                 "⚠️ *Tidak ditemukan area entry yang ideal saat ini yang memenuhi batas minimum skor.*",
                 parse_mode="Markdown"
             )
@@ -68,8 +86,8 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Update status message
         await status_message.edit_text(
-            f"📊 **HASIL SCANNING {config.MT5_SYMBOL} (Proyeksi 2-3 Jam)**\n"
-            f"Harga Saat Ini: **{current_price:.2f}**\n"
+            f"📊 **HASIL SCANNING {symbol} (Proyeksi 2-3 Jam)**\n"
+            f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
             f"Ditemukan **{len(zones)}** zona entry potensial. Mengirim grafik per area...",
             parse_mode="Markdown"
         )
@@ -80,11 +98,11 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prob_label = "🔥 High Probability" if zone.score >= config.HIGH_PROBABILITY_SCORE else "⚡ Medium Probability"
             
             zone_text = (
-                f"📊 **HASIL SCANNING {config.MT5_SYMBOL}**\n"
-                f"Harga Saat Ini: **{current_price:.2f}**\n"
+                f"📊 **HASIL SCANNING {symbol}**\n"
+                f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
                 f"----------------------------------------\n\n"
                 f"{emoji} **SETUP {idx+1}: {zone.zone_type} AREA**\n"
-                f"📍 Zona Entry: **{zone.bottom:.2f} - {zone.top:.2f}**\n"
+                f"📍 Zona Entry: **{f_str.format(zone.bottom)} - {f_str.format(zone.top)}**\n"
                 f"⭐ Skor: **{zone.score:.1f} / 13.0** ({prob_label})\n\n"
                 f"💬 *Detail Konfluensi:*\n"
             )
@@ -93,20 +111,21 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             zone_text += (
                 f"\n🛡️ *Proteksi & Target:*\n"
-                f"• SL: **{zone.sl:.2f}**\n"
-                f"• TP 1: **{zone.tp1:.2f}**\n"
-                f"• TP 2: **{zone.tp2:.2f}**\n"
+                f"• SL: **{f_str.format(zone.sl)}**\n"
+                f"• TP 1: **{f_str.format(zone.tp1)}**\n"
+                f"• TP 2: **{f_str.format(zone.tp2)}**\n"
                 f"• Status: **PENDING**\n"
                 f"----------------------------------------\n\n"
                 f"⚠️ _Not Financial Advice. DYOR._"
             )
+
             
-            # Setup specific button for this zone
+            # Setup specific button for this zone, encoding symbol name in callback_data
             reply_markup = InlineKeyboardMarkup([[
-                InlineKeyboardButton(f"💼 Open Setup {idx+1}", callback_data=f"place_order_{idx}")
+                InlineKeyboardButton(f"💼 Open Setup {idx+1}", callback_data=f"place_order_{symbol}_{idx}")
             ]])
             
-            chart_path = f"chart_{idx}.png"
+            chart_path = f"chart_{pair_key}_{idx}.png"
             chart_generated = False
             try:
                 # Generate chart containing only this single zone
@@ -115,13 +134,14 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     zones=[zone],
                     current_price=current_price,
                     pivots=analyzer.pivots,
-                    symbol=config.MT5_SYMBOL,
+                    symbol=symbol,
                     timeframe="H1",
-                    save_path=chart_path
+                    save_path=chart_path,
+                    decimals=decimals
                 )
                 chart_generated = True
             except Exception as chart_err:
-                logger.error(f"Failed to generate chart for zone {idx+1}: {chart_err}")
+                logger.error(f"Failed to generate chart for {symbol} zone {idx+1}: {chart_err}")
                 
             if chart_generated and os.path.exists(chart_path):
                 try:
@@ -133,7 +153,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             reply_markup=reply_markup
                         )
                 except Exception as send_err:
-                    logger.error(f"Failed to send zone {idx+1} photo: {send_err}")
+                    logger.error(f"Failed to send {symbol} zone {idx+1} photo: {send_err}")
                     await update.message.reply_text(zone_text, parse_mode="Markdown", reply_markup=reply_markup)
                 finally:
                     if os.path.exists(chart_path):
@@ -144,35 +164,53 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Update loading message to complete summary
         try:
             await status_message.edit_text(
-                f"✅ **Scanning Selesai.**\n"
+                f"✅ **Scanning {symbol} Selesai.**\n"
                 f"Ditemukan **{len(zones)}** area entry potensial. Silakan periksa detail grafik dan pasang posisi menggunakan tombol di atas.",
                 parse_mode="Markdown"
             )
         except Exception:
             pass
 
-
     except Exception as e:
-        logger.exception("Error during /scan command execution")
-        dp.disconnect() # Make sure to close MT5 connection
+        logger.exception(f"Error during scan of {symbol}")
+        dp.disconnect()
         await status_message.edit_text(
-            f"❌ **Terjadi Kesalahan saat Pemindaian!**\n\n"
+            f"❌ **Terjadi Kesalahan saat Pemindaian {symbol}!**\n\n"
             f"Error: `{str(e)}`\n"
-            "Pastikan MT5 Anda sudah login ke akun broker dan memiliki chart data XAUUSD.",
+            f"Pastikan MT5 Anda sudah login ke akun broker dan memiliki chart data {symbol}.",
             parse_mode="Markdown"
         )
 
-async def execute_trade_for_zone(chat_id: int, zone, message_object):
+# Command-specific callbacks
+async def scan_xau(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await execute_scan_for_pair(update, context, "xau")
+
+async def scan_eur(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await execute_scan_for_pair(update, context, "eur")
+
+async def scan_gbp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await execute_scan_for_pair(update, context, "gbp")
+
+async def scan_jpy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await execute_scan_for_pair(update, context, "jpy")
+
+async def scan_btc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await execute_scan_for_pair(update, context, "btc")
+
+async def execute_trade_for_zone(chat_id: int, symbol: str, zone, message_object):
     """Connect to MT5 and execute a pending limit order for a given zone."""
     status_msg = await message_object.reply_text(
-        f"⏳ *Mengirim order pending {zone.zone_type} Limit ke MT5...*",
+        f"⏳ *Mengirim order pending {zone.zone_type} Limit {symbol} ke MT5...*",
         parse_mode="Markdown"
     )
     
     # Determine entry price
     entry_price = zone.top if zone.zone_type == "BUY" else zone.bottom
     
-    dp = MT5DataProvider()
+    decimals = zone.decimals
+    f_str = f"{{:.{decimals}f}}"
+    
+    dp = MT5DataProvider(symbol=symbol)
     try:
         success, msg = dp.place_limit_order(
             order_type=zone.zone_type,
@@ -186,12 +224,12 @@ async def execute_trade_for_zone(chat_id: int, zone, message_object):
         result_text = (
             f"{emoji} **STATUS EKSEKUSI PENDING ORDER**\n"
             f"----------------------------------------\n"
-            f"• Simbol: **{config.MT5_SYMBOL}**\n"
+            f"• Simbol: **{symbol}**\n"
             f"• Tipe: **{zone.zone_type} LIMIT**\n"
             f"• Volume: **{config.DEFAULT_LOT} Lot**\n"
-            f"• Price: **{entry_price:.2f}**\n"
-            f"• SL: **{zone.sl:.2f}**\n"
-            f"• TP: **{zone.tp1:.2f}**\n\n"
+            f"• Price: **{f_str.format(entry_price)}**\n"
+            f"• SL: **{f_str.format(zone.sl)}**\n"
+            f"• TP: **{f_str.format(zone.tp1)}**\n\n"
             f"💬 *Respon:* {msg}"
         )
         await status_msg.edit_text(result_text, parse_mode="Markdown")
@@ -201,30 +239,44 @@ async def execute_trade_for_zone(chat_id: int, zone, message_object):
     finally:
         dp.disconnect()
 
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callback queries (e.g. place_order_0)."""
+    """Handle button callback queries (e.g. place_order_EURUSDm_0)."""
     query = update.callback_query
     await query.answer()
     
     chat_id = update.effective_chat.id
-    zones = last_scanned_zones.get(chat_id, [])
-    
-    if not zones:
-        await query.message.reply_text("❌ *Tidak ditemukan data scan terakhir. Silakan jalankan perintah /scan terlebih dahulu.*", parse_mode="Markdown")
-        return
-        
     data = query.data
+    
     if data.startswith("place_order_"):
         try:
-            idx = int(data.split("_")[-1])
-            if 0 <= idx < len(zones):
-                selected_zone = zones[idx]
-                await execute_trade_for_zone(chat_id, selected_zone, query.message)
-            else:
-                await query.message.reply_text("❌ *Indeks zona tidak valid atau data scan sudah usang.*", parse_mode="Markdown")
+            parts = data.split("_")
+            idx = int(parts[-1])
+            symbol = "_".join(parts[2:-1])
+            
+            # Retrieve zones from storage
+            symbol_zones = last_scanned_zones.get(chat_id, {}).get(symbol, [])
+            if not symbol_zones or idx < 0 or idx >= len(symbol_zones):
+                await query.message.reply_text("❌ *Data scan sudah kedaluwarsa atau tidak valid. Silakan jalankan scan kembali.*", parse_mode="Markdown")
+                return
+                
+            selected_zone = symbol_zones[idx]
+            await execute_trade_for_zone(chat_id, symbol, selected_zone, query.message)
         except Exception as e:
             logger.error(f"Error parsing callback data: {e}")
             await query.message.reply_text("❌ *Gagal memproses eksekusi order.*", parse_mode="Markdown")
+
+async def post_init(application: Application) -> None:
+    """Register bot commands list dynamically on Telegram servers."""
+    commands = [
+        BotCommand("start", "Menyapa bot & menampilkan petunjuk awal"),
+        BotCommand("scan_xau", "Scan grafik XAU/USD (Emas)"),
+        BotCommand("scan_eur", "Scan grafik EUR/USD (Euro)"),
+        BotCommand("scan_gbp", "Scan grafik GBP/USD (Pound)"),
+        BotCommand("scan_jpy", "Scan grafik USD/JPY (Yen)"),
+        BotCommand("scan_btc", "Scan grafik BTC/USD (Bitcoin)")
+    ]
+    await application.bot.set_my_commands(commands)
 
 def main():
     # Verify token
@@ -233,19 +285,24 @@ def main():
         print("Silakan buka file .env dan ganti 'YOUR_TELEGRAM_BOT_TOKEN' dengan token asli dari BotFather.")
         return
 
-    print("🤖 Memulai personal XAU Telegram Bot...")
+    print("🤖 Memulai personal MT5 Multi-Pair Telegram Bot...")
     print("Tekan Ctrl+C untuk menghentikan bot.")
 
-    # Create application
-    application = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    # Create application with post_init commands registration
+    application = Application.builder().token(config.TELEGRAM_TOKEN).post_init(post_init).build()
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("scan", scan))
-    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^place_order_\\d+$"))
+    application.add_handler(CommandHandler("scan_xau", scan_xau))
+    application.add_handler(CommandHandler("scan_eur", scan_eur))
+    application.add_handler(CommandHandler("scan_gbp", scan_gbp))
+    application.add_handler(CommandHandler("scan_jpy", scan_jpy))
+    application.add_handler(CommandHandler("scan_btc", scan_btc))
+    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^place_order_.*_\\d+$"))
 
     # Run the bot
     application.run_polling()
 
 if __name__ == "__main__":
     main()
+

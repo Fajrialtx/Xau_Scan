@@ -25,7 +25,24 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 MT5_TERMINAL_PATH = os.environ.get("MT5_TERMINAL_PATH", "")
 DEFAULT_LOT = float(os.environ.get("DEFAULT_LOT", "0.01"))
 
-MT5_SYMBOL = os.environ.get("MT5_SYMBOL", "XAUUSD")
+MT5_SYMBOL = os.environ.get("MT5_SYMBOL", "XAUUSDm")
+
+def get_symbol_suffix():
+    symbol = MT5_SYMBOL
+    # Strip common base symbols to find suffix
+    for base in ["XAUUSD", "GOLD"]:
+        if base in symbol:
+            return symbol.replace(base, "")
+    return ""
+
+SUPPORTED_PAIRS = {
+    "xau": MT5_SYMBOL,
+    "eur": "EURUSD" + get_symbol_suffix(),
+    "gbp": "GBPUSD" + get_symbol_suffix(),
+    "jpy": "USDJPY" + get_symbol_suffix(),
+    "btc": "BTCUSD" + get_symbol_suffix()
+}
+
 
 # Analysis Configuration
 EMA_FAST = 50
