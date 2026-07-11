@@ -1,23 +1,27 @@
 import sys
 import io
+import os
+
 # Configure standard output to use UTF-8 to prevent encoding errors on Windows
 if sys.platform.startswith('win'):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
+# Add parent directory to sys.path to allow importing from scanner
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import pandas as pd
 import numpy as np
 import pytz
 from datetime import datetime, timedelta, time
-import config
-from analyzer import XAUAnalyzer
+import scanner.config as config
+from scanner.analyzer import XAUAnalyzer
 
 class MockDataProvider:
     def __init__(self, symbol: str = None, current_price=2350.0):
         self.symbol = symbol if symbol else config.MT5_SYMBOL
         self.current_price = current_price
         self.tz = pytz.timezone(config.TIMEZONE_STR)
-
 
     def connect(self):
         return True
@@ -31,7 +35,6 @@ class MockDataProvider:
     def place_limit_order(self, order_type: str, price: float, sl: float, tp: float, volume: float = None) -> tuple[bool, str]:
         import random
         return True, f"Mock Order Successful! Ticket: {random.randint(1000000, 9999999)}"
-
 
     def generate_mock_candles(self, timeframe: str, count: int) -> pd.DataFrame:
         """Generate realistic synthetic candle data for testing analysis logic."""
@@ -97,11 +100,7 @@ class MockDataProvider:
             df.loc[203, 'high'] = 2357.0
             df.loc[203, 'low'] = 2339.0
 
-            # FVG is formed between High of 200 (2331.0) and Low of 202 (2329.0) - wait,
-            # Bullish FVG definition: Low of candle i (202) > High of candle i-2 (200).
-            # High of 200 is 2331. Low of 202 is 2329. (No FVG here because 2329 < 2331).
-            # Let's adjust candle 202 low to 2335 to create an FVG:
-            # Low of 202 (2335) > High of 200 (2331). Yes!
+            # FVG is formed between High of 200 (2331.0) and Low of 202 (2329.0)
             df.loc[202, 'low'] = 2335.0
             df.loc[202, 'open'] = 2335.0
 
@@ -112,24 +111,19 @@ class MockDataProvider:
                 df.loc[k, 'high'] = max(df.loc[k, 'high'], 2340.0)
                 df.loc[k, 'open'] = max(df.loc[k, 'open'], 2337.0)
 
-        # Let's override Daily data to simulate yesterday's candle
+        # Let's override Daily data to simulate yesterday's daily candle
         if timeframe == "D1":
-            # Index -2 is yesterday
             df.loc[len(df)-2, 'high'] = 2360.0
             df.loc[len(df)-2, 'low'] = 2320.0
             df.loc[len(df)-2, 'close'] = 2340.0
-            # PP = (2360 + 2320 + 2340) / 3 = 2340.0
-            # S1 = 2 * 2340 - 2360 = 2320.0
 
         # Adjust timestamps for M15 to match Asia session hours (07:00 - 15:00 WIB today)
         if timeframe == "M15":
             today = datetime.now(self.tz).date()
             asia_start = datetime.combine(today, time(8, 0)).astimezone(pytz.utc) # 08:00 WIB is 01:00 UTC
-            # Assign timestamps around Asia session
             for idx in range(count - 40, count):
                 bar_time = asia_start + timedelta(minutes=15 * (idx - (count - 40)))
                 df.loc[idx, 'time'] = bar_time.replace(tzinfo=None)
-                # Let's create an Asia Low at 2332.0 (slightly above our OB top of 2331.0)
                 df.loc[idx, 'low'] = max(df.loc[idx, 'low'], 2332.0)
                 
         return df
@@ -156,7 +150,6 @@ def test_mock_analysis():
         print(f"Proteksi & Target: SL={zone.sl:.2f}, TP1={zone.tp1:.2f}, TP2={zone.tp2:.2f}")
         print("-" * 60)
 
-    # Simple assertions to verify detector works
     assert len(zones) > 0, "Harusnya terdeteksi minimal 1 zona dari data simulasi!"
     assert any(z.zone_type == "BUY" for z in zones), "Harusnya terdeteksi zona BUY!"
     print("✅ VERIFIKASI BERHASIL! Algoritma pendeteksi zona, FVG, dan skoring berfungsi sempurna.")

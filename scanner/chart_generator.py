@@ -137,6 +137,5 @@ def generate_candlestick_chart(df: pd.DataFrame, zones: list, current_price: flo
     plt.tight_layout()
     plt.savefig(save_path, facecolor='#131722', edgecolor='none', dpi=150)
     plt.close()
-
     
     logger.info(f"Chart generated successfully and saved to {save_path}")

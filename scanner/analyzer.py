@@ -3,7 +3,7 @@ import numpy as np
 import pytz
 from datetime import datetime, time
 import logging
-import config
+import scanner.config as config
 
 logger = logging.getLogger(__name__)
 
@@ -589,4 +589,3 @@ class XAUAnalyzer:
         # Re-sort final list by score descending
         merged.sort(key=lambda z: z.score, reverse=True)
         return merged
-

@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime
-import config
+import scanner.config as config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -14,7 +14,6 @@ class MT5DataProvider:
         self.symbol = symbol if symbol else config.MT5_SYMBOL
         self.terminal_path = config.MT5_TERMINAL_PATH
         self.connected = False
-
 
     def connect(self) -> bool:
         """Initialize connection to MetaTrader 5."""
@@ -139,16 +138,16 @@ class MT5DataProvider:
         elif symbol_info.filling_mode & 2:  # SYMBOL_FILLING_IOC
             filling = mt5.ORDER_FILLING_IOC
 
-
-        # Build trade request
+        # Build trade request with symbol-specific digits rounding
+        digits = symbol_info.digits
         request = {
             "action": mt5.TRADE_ACTION_PENDING,
             "symbol": self.symbol,
             "volume": float(volume),
             "type": mt5_order_type,
-            "price": float(round(price, 2)),
-            "sl": float(round(sl, 2)),
-            "tp": float(round(tp, 2)),
+            "price": float(round(price, digits)),
+            "sl": float(round(sl, digits)),
+            "tp": float(round(tp, digits)),
             "deviation": 20,
             "magic": 223344,
             "comment": "XauScan Bot Limit",
@@ -170,4 +169,3 @@ class MT5DataProvider:
 
         logger.info(f"Order placed successfully! Order ticket ID: {result.order}")
         return True, f"Berhasil memasang pending order! Tiket ID: {result.order}"
-

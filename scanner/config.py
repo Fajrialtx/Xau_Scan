@@ -2,16 +2,19 @@ import os
 
 def load_env():
     """Load environment variables from a local .env file if it exists."""
-    if os.path.exists(".env"):
-        with open(".env", "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    val = v.strip()
-                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-                        val = val[1:-1]
-                    os.environ[k.strip()] = val
+    paths = [".env", "../.env"]
+    for path in paths:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        val = v.strip()
+                        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                            val = val[1:-1]
+                        os.environ[k.strip()] = val
+            break
 
 # Load env variables
 load_env()

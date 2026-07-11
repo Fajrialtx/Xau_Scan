@@ -3,10 +3,11 @@ import asyncio
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-import config
-from data_provider import MT5DataProvider
-from analyzer import XAUAnalyzer
-from chart_generator import generate_candlestick_chart
+import scanner.config as config
+from scanner.data_provider import MT5DataProvider
+from scanner.analyzer import XAUAnalyzer
+from scanner.chart_generator import generate_candlestick_chart
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
