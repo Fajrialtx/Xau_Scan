@@ -70,7 +70,7 @@ pip install -r requirements.txt
 ### 3. Konfigurasi Lingkungan (`.env`)
 Buat berkas bernama `.env` di folder root dan isi variabel berikut:
 ```env
-TELEGRAM_TOKEN=8766527408:AAE9dMk5CRiiKlTKEwgSIoGgO6k977Vdn-A
+TELEGRAM_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=YOUR_CHAT_ID
 MT5_TERMINAL_PATH=
 MT5_SYMBOL=XAUUSDm
