@@ -21,3 +21,5 @@ ENV/
 # Generated charts
 chart.png
 
+# Local news cache
+scanner/news_cache.json

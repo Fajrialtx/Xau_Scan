@@ -241,6 +241,22 @@ async def execute_trade_for_zone(chat_id: int, symbol: str, zone, message_object
         dp.disconnect()
 
 
+def get_currencies_for_symbol(symbol: str) -> list:
+    """Extract standard currency codes that are affected by news for this symbol."""
+    sym_upper = symbol.upper()
+    if "XAU" in sym_upper or "GOLD" in sym_upper or "BTC" in sym_upper:
+        return ["USD"]
+    
+    # Check for other standard currency codes inside the symbol name
+    currencies = ["EUR", "GBP", "USD", "JPY", "AUD", "CAD", "CHF", "NZD"]
+    found = []
+    # Match the base and quote currency
+    for c in currencies:
+        if c in sym_upper:
+            found.append(c)
+    return found if found else ["USD"]
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callback queries (e.g. place_order_EURUSDm_0)."""
     query = update.callback_query
@@ -262,10 +278,86 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
                 
             selected_zone = symbol_zones[idx]
-            await execute_trade_for_zone(chat_id, symbol, selected_zone, query.message)
+            
+            # Check for today's high impact news
+            currencies = get_currencies_for_symbol(symbol)
+            from scanner.news_provider import get_today_high_impact_news
+            today_news = get_today_high_impact_news(currencies)
+            
+            if today_news:
+                # Format warning message
+                warning_text = (
+                    f"⚠️ **PERINGATAN: HIGH IMPACT NEWS HARI INI**\n\n"
+                    f"Hari ini terdapat rilis berita ekonomi berdampak tinggi (*High Impact*) untuk mata uang **{', '.join(currencies)}**:\n"
+                )
+                for ev in today_news:
+                    warning_text += f"• 🕐 **{ev['time_str']} WIB** - {ev['country']}: *{ev['title']}*\n"
+                
+                warning_text += (
+                    f"\nEksekusi pending order limit **{symbol}** saat rilis berita berisiko mengalami slippage, spread lebar, atau pergerakan harga yang acak.\n\n"
+                    f"**Apakah Anda tetap ingin membuka posisi ini?**"
+                )
+                
+                # Setup confirmation buttons
+                reply_markup = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ Ya, Tetap Open", callback_data=f"confirm_order_{symbol}_{idx}"),
+                        InlineKeyboardButton("❌ Batal", callback_data="cancel_order")
+                    ]
+                ])
+                
+                # Send warning message
+                await query.message.reply_text(
+                    text=warning_text,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup
+                )
+            else:
+                # No news, execute immediately
+                await execute_trade_for_zone(chat_id, symbol, selected_zone, query.message)
         except Exception as e:
             logger.error(f"Error parsing callback data: {e}")
             await query.message.reply_text("❌ *Gagal memproses eksekusi order.*", parse_mode="Markdown")
+
+    elif data.startswith("confirm_order_"):
+        try:
+            # Remove the warning message's buttons immediately to prevent double-clicking
+            await query.edit_message_reply_markup(reply_markup=None)
+            
+            parts = data.split("_")
+            idx = int(parts[-1])
+            symbol = "_".join(parts[2:-1])
+            
+            # Retrieve zones from storage
+            symbol_zones = last_scanned_zones.get(chat_id, {}).get(symbol, [])
+            if not symbol_zones or idx < 0 or idx >= len(symbol_zones):
+                await query.message.reply_text("❌ *Data scan sudah kedaluwarsa atau tidak valid. Silakan jalankan scan kembali.*", parse_mode="Markdown")
+                return
+                
+            selected_zone = symbol_zones[idx]
+            
+            # Edit warning message text to show we are proceeding
+            await query.edit_message_text(
+                text=f"⚠️ *Peringatan berita dilewati. Melanjutkan eksekusi pending order untuk {symbol}...*",
+                parse_mode="Markdown"
+            )
+            
+            # Execute trade
+            await execute_trade_for_zone(chat_id, symbol, selected_zone, query.message)
+        except Exception as e:
+            logger.error(f"Error parsing confirm callback data: {e}")
+            await query.message.reply_text("❌ *Gagal mengeksekusi order setelah konfirmasi.*", parse_mode="Markdown")
+
+    elif data == "cancel_order":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.edit_message_text(
+                text="❌ *Pemasangan pending order dibatalkan.*",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error handling cancel callback: {e}")
+
 
 async def post_init(application: Application) -> None:
     """Register bot commands list dynamically on Telegram servers."""
@@ -278,7 +370,7 @@ async def post_init(application: Application) -> None:
         BotCommand("scan_btc", "Scan grafik BTC/USD (Bitcoin)")
     ]
     await application.bot.set_my_commands(commands)
-
+ 
 def main():
     # Verify token
     if config.TELEGRAM_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN" or not config.TELEGRAM_TOKEN:
@@ -299,7 +391,7 @@ def main():
     application.add_handler(CommandHandler("scan_gbp", scan_gbp))
     application.add_handler(CommandHandler("scan_jpy", scan_jpy))
     application.add_handler(CommandHandler("scan_btc", scan_btc))
-    application.add_handler(CallbackQueryHandler(handle_callback, pattern="^place_order_.*_\\d+$"))
+    application.add_handler(CallbackQueryHandler(handle_callback))
 
     # Run the bot
     application.run_polling()
