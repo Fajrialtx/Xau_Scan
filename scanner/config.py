@@ -23,6 +23,9 @@ load_env()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 
+# Gemini AI Configuration
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
 # MT5 Connection Configuration
 # Leave empty for default path, or specify the path to terminal.exe if needed
 MT5_TERMINAL_PATH = os.environ.get("MT5_TERMINAL_PATH", "")

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory storage for scan state
 last_scanned_zones = {}  # chat_id -> list of TradingZone
+last_scanned_news = {}   # chat_id -> list of news dicts
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,7 +30,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 /scan_eur - Pemindaian EUR/USD\n"
         "🔍 /scan_gbp - Pemindaian GBP/USD\n"
         "🔍 /scan_jpy - Pemindaian USD/JPY\n"
-        "🔍 /scan_btc - Pemindaian BTC/USD"
+        "🔍 /scan_btc - Pemindaian BTC/USD\n"
+        "📰 /scan_news - Pemindaian Berita Ekonomi Hari Ini"
     )
     await update.message.reply_text(welcome_msg, parse_mode="HTML")
 
@@ -198,6 +200,56 @@ async def scan_jpy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def scan_btc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await execute_scan_for_pair(update, context, "btc")
 
+async def scan_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for /scan_news command to scan today's High Impact news."""
+    chat_id = update.effective_chat.id
+    status_message = await update.message.reply_text(
+        "🔍 *Memindai kalender ekonomi hari ini... Mohon tunggu.*", 
+        parse_mode="Markdown"
+    )
+    
+    try:
+        from scanner.news_provider import get_today_high_impact_news
+        # Check standard currencies relevant to our trading pairs
+        currencies = ["USD", "EUR", "GBP", "JPY"]
+        today_news = get_today_high_impact_news(currencies)
+        
+        if not today_news:
+            await status_message.edit_text(
+                "📅 **JADWAL BERITA HARI INI**\n\n"
+                "✅ Tidak ada berita berdampak tinggi (*High Impact*) yang dijadwalkan hari ini untuk USD, EUR, GBP, atau JPY.",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Store today's scanned news in memory
+        last_scanned_news[chat_id] = today_news
+
+        msg_text = (
+            f"📅 **BERITA HIGH-IMPACT HARI INI ({len(today_news)} Event)**\n"
+            "----------------------------------------\n\n"
+            "Silakan pilih tombol di bawah untuk meminta AI menganalisis berita tersebut menggunakan 5 strategi trader profesional:\n\n"
+        )
+        
+        keyboard = []
+        for idx, ev in enumerate(today_news):
+            msg_text += f"• **{ev['time_str']} WIB** - {ev['country']}: {ev['title']}\n"
+            button_label = f"📊 Analisa {ev['country']} - {ev['title'][:25]}..."
+            keyboard.append([InlineKeyboardButton(button_label, callback_data=f"select_news_{idx}")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await status_message.edit_text(
+            text=msg_text,
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    except Exception as err:
+        logger.exception("Error during scan_news command execution")
+        await status_message.edit_text(
+            f"❌ **Gagal memindai berita ekonomi!**\n\nError: `{str(err)}`",
+            parse_mode="Markdown"
+        )
+
 async def execute_trade_for_zone(chat_id: int, symbol: str, zone, message_object):
     """Connect to MT5 and execute a pending limit order for a given zone."""
     status_msg = await message_object.reply_text(
@@ -255,6 +307,30 @@ def get_currencies_for_symbol(symbol: str) -> list:
         if c in sym_upper:
             found.append(c)
     return found if found else ["USD"]
+
+
+def split_message(text: str, max_chars: int = 4000) -> list:
+    """Split a long text into chunks of max_chars without breaking paragraphs or words."""
+    if len(text) <= max_chars:
+        return [text]
+    
+    chunks = []
+    while text:
+        if len(text) <= max_chars:
+            chunks.append(text)
+            break
+            
+        # Find a suitable split point (e.g. last newline or space before max_chars)
+        split_idx = text.rfind("\n", 0, max_chars)
+        if split_idx == -1:
+            split_idx = text.rfind(" ", 0, max_chars)
+            if split_idx == -1:
+                split_idx = max_chars
+                
+        chunks.append(text[:split_idx])
+        text = text[split_idx:].lstrip()
+        
+    return chunks
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -358,6 +434,74 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error handling cancel callback: {e}")
 
+    elif data.startswith("select_news_"):
+        try:
+            parts = data.split("_")
+            idx = int(parts[-1])
+            
+            # Retrieve news list from storage
+            today_news = last_scanned_news.get(chat_id, [])
+            if not today_news or idx < 0 or idx >= len(today_news):
+                await query.message.reply_text("❌ *Data kalender berita sudah kedaluwarsa atau tidak valid. Silakan jalankan /scan_news kembali.*", parse_mode="Markdown")
+                return
+                
+            selected_event = today_news[idx]
+            
+            # Send loading message
+            status_msg = await query.message.reply_text(
+                f"⏳ *Memulai analisis berita dengan Gemini AI untuk {selected_event['country']} - {selected_event['title']}...\nMohon tunggu.*", 
+                parse_mode="Markdown"
+            )
+            
+            # Perform a quick scan on XAUUSDm to get fresh SMC zones
+            zones_text = ""
+            try:
+                from scanner.data_provider import MT5DataProvider
+                from scanner.analyzer import XAUAnalyzer
+                # Use XAUUSDm (default config symbol) for technical SMC context
+                dp = MT5DataProvider(symbol=config.MT5_SYMBOL)
+                if dp.connect():
+                    analyzer = XAUAnalyzer(dp)
+                    zones = analyzer.analyze()
+                    dp.disconnect()
+                    if zones:
+                        for z_idx, z in enumerate(zones):
+                            zones_text += f"- Setup {z_idx+1}: {z.zone_type} di area {z.bottom} - {z.top} (Score: {z.score:.1f}/13.0)\n"
+                            for d in z.details:
+                                zones_text += f"  • {d}\n"
+                    else:
+                        zones_text = "- Tidak ada area SMC (Order Block/FVG) kuat terdeteksi saat ini.\n"
+                else:
+                    zones_text = "- Gagal terhubung ke MT5 untuk mengambil data teknikal.\n"
+            except Exception as scan_err:
+                logger.error(f"Error during quick SMC scan for news context: {scan_err}")
+                zones_text = "- Gagal melakukan pemindaian data teknikal.\n"
+
+            # Call news analyzer
+            from scanner.news_analyzer import analyze_news_with_gemini
+            analysis_result = analyze_news_with_gemini(selected_event, zones_text)
+            
+            # Split the analysis if it exceeds Telegram's limit (4096 characters)
+            chunks = split_message(analysis_result, max_chars=4000)
+            
+            # Edit the loading message with the first chunk
+            try:
+                await status_msg.edit_text(chunks[0], parse_mode="Markdown")
+            except Exception as send_err:
+                logger.warning(f"Failed to send first chunk with Markdown, falling back to plain text: {send_err}")
+                await status_msg.edit_text(chunks[0])
+                
+            # Send the remaining chunks as new messages
+            for chunk in chunks[1:]:
+                try:
+                    await query.message.reply_text(chunk, parse_mode="Markdown")
+                except Exception as send_err:
+                    logger.warning(f"Failed to send remaining chunk with Markdown, falling back to plain text: {send_err}")
+                    await query.message.reply_text(chunk)
+        except Exception as e:
+            logger.error(f"Error processing news selection callback: {e}")
+            await query.message.reply_text("❌ *Gagal melakukan analisis berita.*", parse_mode="Markdown")
+
 
 async def post_init(application: Application) -> None:
     """Register bot commands list dynamically on Telegram servers."""
@@ -367,7 +511,8 @@ async def post_init(application: Application) -> None:
         BotCommand("scan_eur", "Scan grafik EUR/USD (Euro)"),
         BotCommand("scan_gbp", "Scan grafik GBP/USD (Pound)"),
         BotCommand("scan_jpy", "Scan grafik USD/JPY (Yen)"),
-        BotCommand("scan_btc", "Scan grafik BTC/USD (Bitcoin)")
+        BotCommand("scan_btc", "Scan grafik BTC/USD (Bitcoin)"),
+        BotCommand("scan_news", "Scan & analisa berita penting (High Impact) hari ini")
     ]
     await application.bot.set_my_commands(commands)
  
@@ -391,6 +536,7 @@ def main():
     application.add_handler(CommandHandler("scan_gbp", scan_gbp))
     application.add_handler(CommandHandler("scan_jpy", scan_jpy))
     application.add_handler(CommandHandler("scan_btc", scan_btc))
+    application.add_handler(CommandHandler("scan_news", scan_news))
     application.add_handler(CallbackQueryHandler(handle_callback))
 
     # Run the bot
