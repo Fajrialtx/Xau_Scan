@@ -61,7 +61,7 @@ Format Output yang Harus Dihasilkan:
 Harap berikan respons dalam Bahasa Indonesia yang sangat rapi, informatif, dan terstruktur dengan format Markdown berikut:
 
 ---
-### 📊 ANALISIS FUNDAMENTAL AI: {event.get('title')} ({event.get('country')})
+### 📊 ANALISIS FUNDAMENTAL: {event.get('title')} ({event.get('country')})
 *(Dianalisis menggunakan 5 Strategi Profesional)*
 
 #### 🔍 Penjelasan & Makna Berita

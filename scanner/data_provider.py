@@ -63,6 +63,8 @@ class MT5DataProvider:
     def get_timeframe_constant(self, tf_str: str):
         """Map string timeframe to MT5 constant."""
         tf_mapping = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
             "M15": mt5.TIMEFRAME_M15,
             "M30": mt5.TIMEFRAME_M30,
             "H1": mt5.TIMEFRAME_H1,

@@ -26,6 +26,13 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 # Gemini AI Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Trading Mode Configuration (swing or scalping)
+DEFAULT_TRADING_MODE = os.environ.get("TRADING_MODE", "swing").lower()
+if DEFAULT_TRADING_MODE not in ["swing", "scalping"]:
+    DEFAULT_TRADING_MODE = "swing"
+CURRENT_TRADING_MODE = DEFAULT_TRADING_MODE
+
+
 # MT5 Connection Configuration
 # Leave empty for default path, or specify the path to terminal.exe if needed
 MT5_TERMINAL_PATH = os.environ.get("MT5_TERMINAL_PATH", "")

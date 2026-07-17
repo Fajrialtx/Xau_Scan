@@ -38,8 +38,20 @@ class MockDataProvider:
 
     def generate_mock_candles(self, timeframe: str, count: int) -> pd.DataFrame:
         """Generate realistic synthetic candle data for testing analysis logic."""
-        now = datetime.utcnow()
-        times = [now - timedelta(hours=(count - i) if "H" in timeframe else (count - i) * 15 if "M15" in timeframe else (count - i) * 1440) for i in range(count)]
+        now = datetime.now(pytz.utc).replace(tzinfo=None)
+        if "M5" in timeframe:
+            delta = timedelta(minutes=5)
+        elif "M15" in timeframe:
+            delta = timedelta(minutes=15)
+        elif "M30" in timeframe:
+            delta = timedelta(minutes=30)
+        elif "H1" in timeframe:
+            delta = timedelta(hours=1)
+        elif "H4" in timeframe:
+            delta = timedelta(hours=4)
+        else:
+            delta = timedelta(days=1)
+        times = [now - delta * (count - i) for i in range(count)]
         
         # Base price series
         base_price = 2300.0
@@ -134,12 +146,14 @@ class MockDataProvider:
 
 def test_mock_analysis():
     print("🧪 MENJALANKAN VERIFIKASI ANALISIS DENGAN MOCK DATA...")
+    
+    # 1. Test Swing Mode
+    config.CURRENT_TRADING_MODE = "swing"
     mock_dp = MockDataProvider(current_price=2345.0)
     analyzer = XAUAnalyzer(mock_dp)
-    
     zones = analyzer.analyze()
     
-    print(f"\nHasil Pemindaian Mock (Ditemukan {len(zones)} zona):")
+    print(f"\nHasil Pemindaian Mock - SWING (Ditemukan {len(zones)} zona):")
     print("=" * 60)
     for idx, zone in enumerate(zones):
         print(f"Zona {idx+1}: {zone.zone_type} | Rentang: {zone.bottom} - {zone.top}")
@@ -149,10 +163,29 @@ def test_mock_analysis():
             print(f" - {detail}")
         print(f"Proteksi & Target: SL={zone.sl:.2f}, TP1={zone.tp1:.2f}, TP2={zone.tp2:.2f}")
         print("-" * 60)
+    assert len(zones) > 0, "Swing mode harusnya terdeteksi minimal 1 zona!"
+    assert any(z.zone_type == "BUY" for z in zones), "Swing mode harusnya terdeteksi zona BUY!"
 
-    assert len(zones) > 0, "Harusnya terdeteksi minimal 1 zona dari data simulasi!"
-    assert any(z.zone_type == "BUY" for z in zones), "Harusnya terdeteksi zona BUY!"
-    print("✅ VERIFIKASI BERHASIL! Algoritma pendeteksi zona, FVG, dan skoring berfungsi sempurna.")
+    # 2. Test Scalping Mode
+    config.CURRENT_TRADING_MODE = "scalping"
+    mock_dp_scalping = MockDataProvider(current_price=2336.0)
+    analyzer_scalping = XAUAnalyzer(mock_dp_scalping)
+    zones_scalping = analyzer_scalping.analyze()
+    
+    print(f"\nHasil Pemindaian Mock - SCALPING (Ditemukan {len(zones_scalping)} zona):")
+    print("=" * 60)
+    for idx, zone in enumerate(zones_scalping):
+        print(f"Zona {idx+1}: {zone.zone_type} | Rentang: {zone.bottom} - {zone.top}")
+        print(f"Skor Total: {zone.score:.2f} / 13.0")
+        print("Detail Konfluensi:")
+        for detail in zone.details:
+            print(f" - {detail}")
+        print(f"Proteksi & Target: SL={zone.sl:.2f}, TP1={zone.tp1:.2f}, TP2={zone.tp2:.2f}")
+        print("-" * 60)
+    assert len(zones_scalping) > 0, "Scalping mode harusnya terdeteksi minimal 1 zona!"
+    assert any(z.zone_type == "BUY" for z in zones_scalping), "Scalping mode harusnya terdeteksi zona BUY!"
+
+    print("✅ VERIFIKASI BERHASIL! Algoritma Swing & Scalping berfungsi sempurna.")
 
 if __name__ == "__main__":
     test_mock_analysis()

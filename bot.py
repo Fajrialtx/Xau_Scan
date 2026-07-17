@@ -31,9 +31,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 /scan_gbp - Pemindaian GBP/USD\n"
         "🔍 /scan_jpy - Pemindaian USD/JPY\n"
         "🔍 /scan_btc - Pemindaian BTC/USD\n"
-        "📰 /scan_news - Pemindaian Berita Ekonomi Hari Ini"
+        "📰 /scan_news - Pemindaian Berita Ekonomi Hari Ini\n"
+        "⚙️ /set_mode - Mengatur Mode Trading (Swing vs Scalping)"
     )
     await update.message.reply_text(welcome_msg, parse_mode="HTML")
+
+
+async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for the /set_mode command."""
+    current_mode = config.CURRENT_TRADING_MODE.upper()
+    keyboard = [
+        [
+            InlineKeyboardButton("📈 Swing / Intraday", callback_data="switch_mode_swing"),
+            InlineKeyboardButton("⚡ Scalping (Tf Kecil)", callback_data="switch_mode_scalping")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = (
+        f"⚙️ **PENGATURAN MODE TRADING**\n\n"
+        f"Mode Aktif Saat Ini: **{current_mode}**\n\n"
+        f"Silakan pilih mode trading yang ingin digunakan:"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=reply_markup)
 
 
 async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TYPE, pair_key: str):
@@ -78,9 +97,11 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
         # Disconnect after fetching/analyzing to be clean
         dp.disconnect()
         
+        mode_label = config.CURRENT_TRADING_MODE.upper()
+
         if not zones:
             await status_message.edit_text(
-                f"📊 **HASIL SCANNING {symbol}**\n"
+                f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
                 f"Harga Saat Ini: **{f_str.format(current_price)}**\n\n"
                 "⚠️ *Tidak ditemukan area entry yang ideal saat ini yang memenuhi batas minimum skor.*",
                 parse_mode="Markdown"
@@ -89,7 +110,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
 
         # Update status message
         await status_message.edit_text(
-            f"📊 **HASIL SCANNING {symbol} (Proyeksi 2-3 Jam)**\n"
+            f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
             f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
             f"Ditemukan **{len(zones)}** zona entry potensial. Mengirim grafik per area...",
             parse_mode="Markdown"
@@ -101,7 +122,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
             prob_label = "🔥 High Probability" if zone.score >= config.HIGH_PROBABILITY_SCORE else "⚡ Medium Probability"
             
             zone_text = (
-                f"📊 **HASIL SCANNING {symbol}**\n"
+                f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
                 f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
                 f"----------------------------------------\n\n"
                 f"{emoji} **SETUP {idx+1}: {zone.zone_type} AREA**\n"
@@ -138,7 +159,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
                     current_price=current_price,
                     pivots=analyzer.pivots,
                     symbol=symbol,
-                    timeframe="H1",
+                    timeframe="M15" if config.CURRENT_TRADING_MODE == "scalping" else "H1",
                     save_path=chart_path,
                     decimals=decimals
                 )
@@ -449,7 +470,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Send loading message
             status_msg = await query.message.reply_text(
-                f"⏳ *Memulai analisis berita dengan Gemini AI untuk {selected_event['country']} - {selected_event['title']}...\nMohon tunggu.*", 
+                f"⏳ *Memulai analisis berita untuk {selected_event['country']} - {selected_event['title']}...\nMohon tunggu.*", 
                 parse_mode="Markdown"
             )
             
@@ -502,11 +523,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error processing news selection callback: {e}")
             await query.message.reply_text("❌ *Gagal melakukan analisis berita.*", parse_mode="Markdown")
 
+    elif data.startswith("switch_mode_"):
+        try:
+            new_mode = data.split("_")[-1]  # "swing" or "scalping"
+            config.CURRENT_TRADING_MODE = new_mode
+            
+            mode_label = "📈 SWING / INTRADAY" if new_mode == "swing" else "⚡ SCALPING (Tf Kecil)"
+            
+            # Edit the message to show confirmation and remove buttons
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.edit_message_text(
+                text=f"✅ **Mode trading berhasil diubah!**\n\nMode Aktif Sekarang: **{mode_label}**",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error switching trading mode: {e}")
+            await query.message.reply_text("❌ *Gagal mengubah mode trading.*", parse_mode="Markdown")
+
 
 async def post_init(application: Application) -> None:
     """Register bot commands list dynamically on Telegram servers."""
     commands = [
         BotCommand("start", "Menyapa bot & menampilkan petunjuk awal"),
+        BotCommand("set_mode", "Pilih Mode Trading (Swing vs Scalping)"),
         BotCommand("scan_xau", "Scan grafik XAU/USD (Emas)"),
         BotCommand("scan_eur", "Scan grafik EUR/USD (Euro)"),
         BotCommand("scan_gbp", "Scan grafik GBP/USD (Pound)"),
@@ -531,6 +570,7 @@ def main():
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("set_mode", set_mode))
     application.add_handler(CommandHandler("scan_xau", scan_xau))
     application.add_handler(CommandHandler("scan_eur", scan_eur))
     application.add_handler(CommandHandler("scan_gbp", scan_gbp))

@@ -41,48 +41,93 @@ class XAUAnalyzer:
 
     def get_symbol_params(self, symbol: str) -> dict:
         sym = symbol.upper()
-        if "XAU" in sym or "GOLD" in sym:
-            return {
-                "impulsive_threshold": 5.0,
-                "zone_limit_range": 30.0,
-                "buffer": 3.5,
-                "decimals": 2
-            }
-        elif "EUR" in sym:
-            return {
-                "impulsive_threshold": 0.0015,
-                "zone_limit_range": 0.0150,
-                "buffer": 0.0010,
-                "decimals": 5
-            }
-        elif "GBP" in sym:
-            return {
-                "impulsive_threshold": 0.0020,
-                "zone_limit_range": 0.0200,
-                "buffer": 0.0012,
-                "decimals": 5
-            }
-        elif "JPY" in sym:
-            return {
-                "impulsive_threshold": 0.25,
-                "zone_limit_range": 2.50,
-                "buffer": 0.15,
-                "decimals": 3
-            }
-        elif "BTC" in sym:
-            return {
-                "impulsive_threshold": 150.0,
-                "zone_limit_range": 1500.0,
-                "buffer": 100.0,
-                "decimals": 2
-            }
-        else:
-            return {
-                "impulsive_threshold": 5.0,
-                "zone_limit_range": 30.0,
-                "buffer": 3.5,
-                "decimals": 2
-            }
+        mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
+        if mode == "scalping":
+            if "XAU" in sym or "GOLD" in sym:
+                return {
+                    "impulsive_threshold": 1.5,
+                    "zone_limit_range": 8.0,
+                    "buffer": 1.2,
+                    "decimals": 2
+                }
+            elif "EUR" in sym:
+                return {
+                    "impulsive_threshold": 0.0004,
+                    "zone_limit_range": 0.0040,
+                    "buffer": 0.0003,
+                    "decimals": 5
+                }
+            elif "GBP" in sym:
+                return {
+                    "impulsive_threshold": 0.0005,
+                    "zone_limit_range": 0.0050,
+                    "buffer": 0.0004,
+                    "decimals": 5
+                }
+            elif "JPY" in sym:
+                return {
+                    "impulsive_threshold": 0.08,
+                    "zone_limit_range": 0.70,
+                    "buffer": 0.05,
+                    "decimals": 3
+                }
+            elif "BTC" in sym:
+                return {
+                    "impulsive_threshold": 40.0,
+                    "zone_limit_range": 400.0,
+                    "buffer": 25.0,
+                    "decimals": 2
+                }
+            else:
+                return {
+                    "impulsive_threshold": 1.5,
+                    "zone_limit_range": 8.0,
+                    "buffer": 1.2,
+                    "decimals": 2
+                }
+        else:  # swing mode
+            if "XAU" in sym or "GOLD" in sym:
+                return {
+                    "impulsive_threshold": 5.0,
+                    "zone_limit_range": 30.0,
+                    "buffer": 3.5,
+                    "decimals": 2
+                }
+            elif "EUR" in sym:
+                return {
+                    "impulsive_threshold": 0.0015,
+                    "zone_limit_range": 0.0150,
+                    "buffer": 0.0010,
+                    "decimals": 5
+                }
+            elif "GBP" in sym:
+                return {
+                    "impulsive_threshold": 0.0020,
+                    "zone_limit_range": 0.0200,
+                    "buffer": 0.0012,
+                    "decimals": 5
+                }
+            elif "JPY" in sym:
+                return {
+                    "impulsive_threshold": 0.25,
+                    "zone_limit_range": 2.50,
+                    "buffer": 0.15,
+                    "decimals": 3
+                }
+            elif "BTC" in sym:
+                return {
+                    "impulsive_threshold": 150.0,
+                    "zone_limit_range": 1500.0,
+                    "buffer": 100.0,
+                    "decimals": 2
+                }
+            else:
+                return {
+                    "impulsive_threshold": 5.0,
+                    "zone_limit_range": 30.0,
+                    "buffer": 3.5,
+                    "decimals": 2
+                }
 
 
     def calculate_ema(self, df: pd.DataFrame, period: int) -> pd.Series:
@@ -317,61 +362,97 @@ class XAUAnalyzer:
 
     def analyze(self) -> list:
         """Run the multi-timeframe scoring analysis and return valid entry zones."""
-        # 1. Fetch historical rates for H4, H1, M30, M15, Daily
-        df_h4 = self.dp.fetch_rates("H4", 300)
-        df_h1 = self.dp.fetch_rates("H1", 300)
-        self.df_h1 = df_h1
-        df_m30 = self.dp.fetch_rates("M30", 300)
-        df_m15 = self.dp.fetch_rates("M15", 300)
-        df_d1 = self.dp.fetch_rates("D1", 10)
+        mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
         
+        # 1. Fetch historical rates based on active mode
+        df_d1 = self.dp.fetch_rates("D1", 10)
         current_price = self.dp.get_current_price()
         
-        # Calculate EMA for trend filters
-        df_h4['ema_200'] = self.calculate_ema(df_h4, config.EMA_SLOW)
-        df_h1['ema_50'] = self.calculate_ema(df_h1, config.EMA_FAST)
-        df_h1['ema_200'] = self.calculate_ema(df_h1, config.EMA_SLOW)
-        df_m15['ema_50'] = self.calculate_ema(df_m15, config.EMA_FAST)
-        
-        # Get latest EMA values
-        h4_ema200 = df_h4['ema_200'].iloc[-1]
-        h1_ema50 = df_h1['ema_50'].iloc[-1]
-        h1_ema200 = df_h1['ema_200'].iloc[-1]
-        m15_ema50 = df_m15['ema_50'].iloc[-1]
-        
+        if mode == "scalping":
+            df_h1 = self.dp.fetch_rates("H1", 300)
+            df_m30 = self.dp.fetch_rates("M30", 300)
+            df_m15 = self.dp.fetch_rates("M15", 300)
+            self.df_h1 = df_m15  # For chart plotting, the base chart is M15
+            df_m5 = self.dp.fetch_rates("M5", 300)
+            
+            # Calculate EMA for trend filters
+            df_h1['ema_200'] = self.calculate_ema(df_h1, config.EMA_SLOW)
+            df_m15['ema_50'] = self.calculate_ema(df_m15, config.EMA_FAST)
+            df_m15['ema_200'] = self.calculate_ema(df_m15, config.EMA_SLOW)
+            df_m5['ema_50'] = self.calculate_ema(df_m5, config.EMA_FAST)
+            
+            # Get latest EMA values
+            h1_ema200 = df_h1['ema_200'].iloc[-1]
+            m15_ema50 = df_m15['ema_50'].iloc[-1]
+            m15_ema200 = df_m15['ema_200'].iloc[-1]
+            m5_ema50 = df_m5['ema_50'].iloc[-1]
+        else:
+            df_h4 = self.dp.fetch_rates("H4", 300)
+            df_h1 = self.dp.fetch_rates("H1", 300)
+            self.df_h1 = df_h1  # For chart plotting, the base chart is H1
+            df_m30 = self.dp.fetch_rates("M30", 300)
+            df_m15 = self.dp.fetch_rates("M15", 300)
+            
+            # Calculate EMA for trend filters
+            df_h4['ema_200'] = self.calculate_ema(df_h4, config.EMA_SLOW)
+            df_h1['ema_50'] = self.calculate_ema(df_h1, config.EMA_FAST)
+            df_h1['ema_200'] = self.calculate_ema(df_h1, config.EMA_SLOW)
+            df_m15['ema_50'] = self.calculate_ema(df_m15, config.EMA_FAST)
+            
+            # Get latest EMA values
+            h4_ema200 = df_h4['ema_200'].iloc[-1]
+            h1_ema50 = df_h1['ema_50'].iloc[-1]
+            h1_ema200 = df_h1['ema_200'].iloc[-1]
+            m15_ema50 = df_m15['ema_50'].iloc[-1]
+            
         # Fetch pivot levels & VWAP
         pivots = self.calculate_pivot_points(df_d1)
         self.pivots = pivots
-        vwap = self.calculate_vwap_today(df_m15)
+        vwap = self.calculate_vwap_today(df_m5 if mode == "scalping" else df_m15)
         
         # Fetch Asia Session range
         asia_high, asia_low = self.get_asia_session_range(df_m15)
         
-        # Detect Swing High/Low for Fibonacci on H1 and M30
-        h1_highs, h1_lows = self.get_swings(df_h1, window=10)
-        m30_highs, m30_lows = self.get_swings(df_m30, window=10)
-        
-        # Find latest H1/M30 swing high and low to draw Fibonacci
+        # Detect Swing High/Low for Fibonacci
         swing_high = None
         swing_low = None
-        if len(h1_highs) > 0 and len(h1_lows) > 0:
-            # Get latest swing high and low
-            swing_high = h1_highs[-1][1]
-            swing_low = h1_lows[-1][1]
-        elif len(m30_highs) > 0 and len(m30_lows) > 0:
-            swing_high = m30_highs[-1][1]
-            swing_low = m30_lows[-1][1]
-
-        # 2. Scan H1 & H4 for Order Blocks (Core Zones)
-        h1_obs = self.detect_order_blocks(df_h1, "H1")
-        h4_obs = self.detect_order_blocks(df_h4, "H4")
-        all_obs = h1_obs + h4_obs
-        
-        # Detect FVGs on H1 & H4
-        h1_fvgs = self.detect_fvgs(df_h1, "H1")
-        h4_fvgs = self.detect_fvgs(df_h4, "H4")
-        all_fvgs = h1_fvgs + h4_fvgs
-        
+        if mode == "scalping":
+            m15_highs, m15_lows = self.get_swings(df_m15, window=10)
+            m5_highs, m5_lows = self.get_swings(df_m5, window=10)
+            if len(m15_highs) > 0 and len(m15_lows) > 0:
+                swing_high = m15_highs[-1][1]
+                swing_low = m15_lows[-1][1]
+            elif len(m5_highs) > 0 and len(m5_lows) > 0:
+                swing_high = m5_highs[-1][1]
+                swing_low = m5_lows[-1][1]
+        else:
+            h1_highs, h1_lows = self.get_swings(df_h1, window=10)
+            m30_highs, m30_lows = self.get_swings(df_m30, window=10)
+            if len(h1_highs) > 0 and len(h1_lows) > 0:
+                swing_high = h1_highs[-1][1]
+                swing_low = h1_lows[-1][1]
+            elif len(m30_highs) > 0 and len(m30_lows) > 0:
+                swing_high = m30_highs[-1][1]
+                swing_low = m30_lows[-1][1]
+                
+        # 2. Scan for Order Blocks (Core Zones) and FVGs
+        if mode == "scalping":
+            m15_obs = self.detect_order_blocks(df_m15, "M15")
+            m5_obs = self.detect_order_blocks(df_m5, "M5")
+            all_obs = m15_obs + m5_obs
+            
+            m15_fvgs = self.detect_fvgs(df_m15, "M15")
+            m5_fvgs = self.detect_fvgs(df_m5, "M5")
+            all_fvgs = m15_fvgs + m5_fvgs
+        else:
+            h1_obs = self.detect_order_blocks(df_h1, "H1")
+            h4_obs = self.detect_order_blocks(df_h4, "H4")
+            all_obs = h1_obs + h4_obs
+            
+            h1_fvgs = self.detect_fvgs(df_h1, "H1")
+            h4_fvgs = self.detect_fvgs(df_h4, "H4")
+            all_fvgs = h1_fvgs + h4_fvgs
+            
         valid_zones = []
         
         # We only consider zones within range of current price to be realistic
@@ -390,7 +471,7 @@ class XAUAnalyzer:
             distance = abs(current_price - (zone.top + zone.bottom) / 2.0)
             if distance > zone_limit_range:
                 continue
-
+                
             # --- PILAR 1: Penentu Area Inti ---
             # OB is core: starts with +3 points
             zone.score = 3.0
@@ -411,12 +492,12 @@ class XAUAnalyzer:
                         if abs(fvg.top - zone.bottom) <= fvg_overlap_tol or (fvg.top >= zone.bottom and fvg.bottom <= zone.top):
                             has_overlapping_fvg = True
                             break
-            
+                            
             if has_overlapping_fvg:
                 # Add +2 points for FVG, making it +5.0 combo total
                 zone.score += 2.0
                 zone.details.append("Fair Value Gap (FVG) Confluence (+2.0)")
-            
+                
             # --- PILAR 2: Konfluensi ---
             # Fibonacci Retracement
             if swing_high and swing_low and swing_high > swing_low:
@@ -438,7 +519,7 @@ class XAUAnalyzer:
                     if (zone.bottom - fib_tol <= fib_618 <= zone.top + fib_tol) or (zone.bottom - fib_tol <= fib_786 <= zone.top + fib_tol):
                         zone.score += 2.0
                         zone.details.append("Fibonacci Retracement (61.8% / 78.6%) overlap (+2.0)")
-            
+                        
             # Pivot Points & VWAP
             near_pivot_or_vwap = False
             if pivots:
@@ -446,7 +527,7 @@ class XAUAnalyzer:
                 target_pivot = pivots["S1"] if zone.zone_type == "BUY" else pivots["R1"]
                 if abs((zone.top + zone.bottom)/2.0 - pivots["PP"]) <= pivot_tol or abs((zone.top + zone.bottom)/2.0 - target_pivot) <= pivot_tol:
                     near_pivot_or_vwap = True
-            
+                    
             if vwap:
                 if abs((zone.top + zone.bottom)/2.0 - vwap) <= pivot_tol:
                     near_pivot_or_vwap = True
@@ -456,27 +537,49 @@ class XAUAnalyzer:
                 zone.details.append("Daily Pivot or VWAP proximity (+1.0)")
                 
             # --- PILAR 3: Keselarasan Tren MTF ---
-            if zone.zone_type == "BUY":
-                if current_price > h4_ema200:
-                    zone.score += 1.0
-                    zone.details.append("H4 Trend Bullish (Price > EMA 200) (+1.0)")
-                if current_price > h1_ema50:
-                    zone.score += 1.0
-                    zone.details.append("H1 Trend Bullish (Price > EMA 50) (+1.0)")
-                if current_price > m15_ema50:
-                    zone.score += 0.5
-                    zone.details.append("M15 Trend Bullish (Price > EMA 50) (+0.5)")
-            else:
-                if current_price < h4_ema200:
-                    zone.score += 1.0
-                    zone.details.append("H4 Trend Bearish (Price < EMA 200) (+1.0)")
-                if current_price < h1_ema50:
-                    zone.score += 1.0
-                    zone.details.append("H1 Trend Bearish (Price < EMA 50) (+1.0)")
-                if current_price < m15_ema50:
-                    zone.score += 0.5
-                    zone.details.append("M15 Trend Bearish (Price < EMA 50) (+0.5)")
-                    
+            if mode == "scalping":
+                if zone.zone_type == "BUY":
+                    if current_price > h1_ema200:
+                        zone.score += 1.0
+                        zone.details.append("H1 Trend Bullish (Price > EMA 200) (+1.0)")
+                    if current_price > m15_ema50:
+                        zone.score += 1.0
+                        zone.details.append("M15 Trend Bullish (Price > EMA 50) (+1.0)")
+                    if current_price > m5_ema50:
+                        zone.score += 0.5
+                        zone.details.append("M5 Trend Bullish (Price > EMA 50) (+0.5)")
+                else:
+                    if current_price < h1_ema200:
+                        zone.score += 1.0
+                        zone.details.append("H1 Trend Bearish (Price < EMA 200) (+1.0)")
+                    if current_price < m15_ema50:
+                        zone.score += 1.0
+                        zone.details.append("M15 Trend Bearish (Price < EMA 50) (+1.0)")
+                    if current_price < m5_ema50:
+                        zone.score += 0.5
+                        zone.details.append("M5 Trend Bearish (Price < EMA 50) (+0.5)")
+            else:  # swing mode
+                if zone.zone_type == "BUY":
+                    if current_price > h4_ema200:
+                        zone.score += 1.0
+                        zone.details.append("H4 Trend Bullish (Price > EMA 200) (+1.0)")
+                    if current_price > h1_ema50:
+                        zone.score += 1.0
+                        zone.details.append("H1 Trend Bullish (Price > EMA 50) (+1.0)")
+                    if current_price > m15_ema50:
+                        zone.score += 0.5
+                        zone.details.append("M15 Trend Bullish (Price > EMA 50) (+0.5)")
+                else:
+                    if current_price < h4_ema200:
+                        zone.score += 1.0
+                        zone.details.append("H4 Trend Bearish (Price < EMA 200) (+1.0)")
+                    if current_price < h1_ema50:
+                        zone.score += 1.0
+                        zone.details.append("H1 Trend Bearish (Price < EMA 50) (+1.0)")
+                    if current_price < m15_ema50:
+                        zone.score += 0.5
+                        zone.details.append("M15 Trend Bearish (Price < EMA 50) (+0.5)")
+                        
             # --- PILAR 4: Konteks Sesi & Likuiditas ---
             # Asia Session Sweep
             is_asia_sweep = False
@@ -493,11 +596,13 @@ class XAUAnalyzer:
                 zone.score += 1.5
                 zone.details.append("Asia Session Liquidity Sweep Zone (+1.5)")
                 
-            # CHoCH/BOS check on M15
-            if self.check_choch_bos(df_m15, zone.zone_type):
+            # CHoCH/BOS check on M5 for scalping, M15 for swing
+            ch_df = df_m5 if mode == "scalping" else df_m15
+            ch_label = "M5" if mode == "scalping" else "M15"
+            if self.check_choch_bos(ch_df, zone.zone_type):
                 zone.score += 2.0
-                zone.details.append("M15 CHoCH/BOS Market Structure Shift (+2.0)")
-
+                zone.details.append(f"{ch_label} CHoCH/BOS Market Structure Shift (+2.0)")
+                
             # Check if zone meets minimum score threshold
             if zone.score >= config.MIN_SCORE_SHOW:
                 # Calculate SL & TP
@@ -514,14 +619,13 @@ class XAUAnalyzer:
                     zone.tp2 = zone.bottom - 3.0 * risk
                     
                 valid_zones.append(zone)
-
-
+                
         # Sort zones by score descending
         valid_zones.sort(key=lambda z: z.score, reverse=True)
         # Merge overlapping zones (MTF Refinement)
         merged_zones = self.merge_overlapping_zones(valid_zones)
         return merged_zones
-
+        
     def is_overlapping(self, zone_a, zone_b) -> bool:
         """Check if two zones overlap by 50% or more of the smaller zone."""
         if zone_a.zone_type != zone_b.zone_type:
@@ -543,7 +647,7 @@ class XAUAnalyzer:
             
         overlap_ratio = overlap_height / min_height
         return overlap_ratio >= 0.5
-
+        
     def merge_overlapping_zones(self, zones: list) -> list:
         """Merge overlapping zones, keeping the HTF/higher score zone and adding confirmation score."""
         if not zones:
@@ -552,9 +656,13 @@ class XAUAnalyzer:
         merged = []
         used_indices = set()
         
-        # Sort by timeframe priority (H4 first, then H1) and then score descending
+        mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
+        # Sort by timeframe priority (H4/M15 first, then H1/M5) and then score descending
         def sort_key(z):
-            tf_weight = 2 if z.timeframe == "H4" else 1
+            if mode == "scalping":
+                tf_weight = 2 if z.timeframe == "M15" else 1
+            else:
+                tf_weight = 2 if z.timeframe == "H4" else 1
             return (tf_weight, z.score)
             
         sorted_zones = sorted(zones, key=sort_key, reverse=True)
@@ -576,7 +684,7 @@ class XAUAnalyzer:
                     used_indices.add(j)
                     has_refinement = True
                     refined_timeframes.add(zone_b.timeframe)
-            
+                    
             if has_refinement and len(refined_timeframes) > 1:
                 # Add +1.0 for multi-timeframe confirmation
                 primary_zone.score += 1.0
