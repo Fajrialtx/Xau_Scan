@@ -98,12 +98,28 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
         dp.disconnect()
         
         mode_label = config.CURRENT_TRADING_MODE.upper()
+        
+        # Map session names to pretty labels
+        session_icons = {
+            "ASIA": "🇯🇵 ASIA",
+            "ASIA (PRE-LONDON PREP)": "🇯🇵 ASIA (Pre-London Prep) ⏳",
+            "LONDON": "🇬🇧 LONDON",
+            "LONDON (PRE-NY PREP)": "🇬🇧 LONDON (Pre-NY Prep) ⏳",
+            "NEW_YORK": "🇺🇸 NEW YORK",
+            "ROLLOVER": "⚠️ ROLLOVER (Jam Mati / Spread Lebar)"
+        }
+        raw_sess = getattr(analyzer, "session_name", "ASIA")
+        session_label = session_icons.get(raw_sess, raw_sess)
 
         if not zones:
+            rollover_warning = ""
+            if raw_sess == "ROLLOVER":
+                rollover_warning = "\n\n⚠️ *Peringatan: Pasar saat ini berada pada jam Rollover. Spread broker kemungkinan melebar dan likuiditas tipis. Disarankan untuk menunda entry.*"
             await status_message.edit_text(
                 f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
-                f"Harga Saat Ini: **{f_str.format(current_price)}**\n\n"
-                "⚠️ *Tidak ditemukan area entry yang ideal saat ini yang memenuhi batas minimum skor.*",
+                f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
+                f"Sesi Aktif: **{session_label}**\n\n"
+                f"⚠️ *Tidak ditemukan area entry yang ideal saat ini yang memenuhi batas minimum skor.*{rollover_warning}",
                 parse_mode="Markdown"
             )
             return
@@ -112,6 +128,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
         await status_message.edit_text(
             f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
             f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
+            f"Sesi Aktif: **{session_label}**\n"
             f"Ditemukan **{len(zones)}** zona entry potensial. Mengirim grafik per area...",
             parse_mode="Markdown"
         )
@@ -121,9 +138,14 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
             emoji = "🟢" if zone.zone_type == "BUY" else "🔴"
             prob_label = "🔥 High Probability" if zone.score >= config.HIGH_PROBABILITY_SCORE else "⚡ Medium Probability"
             
+            rollover_warning = ""
+            if raw_sess == "ROLLOVER":
+                rollover_warning = "\n⚠️ **PERINGATAN**: Jam Rollover, hindari instant execution!"
+                
             zone_text = (
                 f"📊 **HASIL SCANNING {symbol} ({mode_label})**\n"
                 f"Harga Saat Ini: **{f_str.format(current_price)}**\n"
+                f"Sesi Aktif: **{session_label}**\n"
                 f"----------------------------------------\n\n"
                 f"{emoji} **SETUP {idx+1}: {zone.zone_type} AREA**\n"
                 f"📍 Zona Entry: **{f_str.format(zone.bottom)} - {f_str.format(zone.top)}**\n"
@@ -139,7 +161,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
                 f"• TP 1: **{f_str.format(zone.tp1)}**\n"
                 f"• TP 2: **{f_str.format(zone.tp2)}**\n"
                 f"• Status: **PENDING**\n"
-                f"----------------------------------------\n\n"
+                f"----------------------------------------{rollover_warning}\n\n"
                 f"⚠️ _Not Financial Advice. DYOR._"
             )
 

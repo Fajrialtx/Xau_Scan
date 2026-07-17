@@ -263,31 +263,67 @@ class XAUAnalyzer:
         return fvgs
 
 
-    def get_asia_session_range(self, df_m15: pd.DataFrame):
+    def get_session_range(self, df_m15: pd.DataFrame, start_hour: int, end_hour: int):
         """
-        Find highest high and lowest low of Asia session.
-        Time: 07:00 to 15:00 WIB (Jakarta Time).
+        Find highest high and lowest low of a session.
+        Handles sessions within the same day or overnight (like NY).
         """
-        # Convert df timestamps to Jakarta timezone
         df = df_m15.copy()
         df['time_local'] = df['time'].dt.tz_localize('UTC').dt.tz_convert(self.tz)
         
-        # Filter all historical bars that fall into the Asia session hour range
-        asia_hours_df = df[
-            (df['time_local'].dt.hour >= config.ASIA_START_HOUR) & 
-            (df['time_local'].dt.hour < config.ASIA_END_HOUR)
-        ]
+        # Get the latest date represented in the dataset
+        latest_time = df['time_local'].max()
+        latest_date = latest_time.date()
         
-        if len(asia_hours_df) > 0:
-            # Get the latest date that actually has Asia session data
-            last_asia_date = asia_hours_df['time_local'].dt.date.max()
-            asia_df = asia_hours_df[asia_hours_df['time_local'].dt.date == last_asia_date]
+        # Filter candles for the session
+        if start_hour < end_hour:
+            # Same day session (e.g., Asia 7-15, London 14-22)
+            session_df = df[
+                (df['time_local'].dt.date == latest_date) &
+                (df['time_local'].dt.hour >= start_hour) &
+                (df['time_local'].dt.hour < end_hour)
+            ]
+        else:
+            # Overnight session (e.g., NY 19 - 3)
+            session_df = df[
+                ((df['time_local'].dt.date == latest_date) & (df['time_local'].dt.hour >= start_hour)) |
+                ((df['time_local'].dt.date == latest_date - pd.Timedelta(days=1)) & (df['time_local'].dt.hour < end_hour))
+            ]
             
-            asia_high = asia_df['high'].max()
-            asia_low = asia_df['low'].min()
-            return asia_high, asia_low
-            
+        if len(session_df) > 0:
+            return session_df['high'].max(), session_df['low'].min()
         return None, None
+
+    def get_current_session_info(self, current_time) -> tuple[str, bool]:
+        """
+        Determine the active session name and whether it's within a Killzone based on current local time.
+        """
+        hour = current_time.hour + current_time.minute / 60.0
+        
+        # Determine active session
+        if 7.0 <= hour < 14.0:
+            if hour >= 13.0:
+                session_name = "ASIA (PRE-LONDON PREP)"
+            else:
+                session_name = "ASIA"
+        elif 14.0 <= hour < 19.0:
+            if hour >= 18.0:
+                session_name = "LONDON (PRE-NY PREP)"
+            else:
+                session_name = "LONDON"
+        elif hour >= 19.0 or hour < 3.0:
+            session_name = "NEW_YORK"
+        else:
+            session_name = "ROLLOVER"
+            
+        # Determine if inside Killzone
+        is_killzone = False
+        if config.LONDON_KILLZONE_START <= hour < config.LONDON_KILLZONE_END:
+            is_killzone = True
+        elif config.NY_KILLZONE_START <= hour < config.NY_KILLZONE_END:
+            is_killzone = True
+            
+        return session_name, is_killzone
 
     def check_choch_bos(self, df_m15: pd.DataFrame, zone_type: str) -> bool:
         """
@@ -360,7 +396,7 @@ class XAUAnalyzer:
         vwap = (tp * vol).sum() / vol.sum()
         return vwap
 
-    def analyze(self) -> list:
+    def analyze(self, current_time: datetime = None) -> list:
         """Run the multi-timeframe scoring analysis and return valid entry zones."""
         mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
         
@@ -410,8 +446,20 @@ class XAUAnalyzer:
         self.pivots = pivots
         vwap = self.calculate_vwap_today(df_m5 if mode == "scalping" else df_m15)
         
+        # Get session info based on current local time
+        if current_time is None:
+            current_time = datetime.now(self.tz)
+        session_name, is_killzone = self.get_current_session_info(current_time)
+        self.session_name = session_name
+        self.is_killzone = is_killzone
+        
         # Fetch Asia Session range
-        asia_high, asia_low = self.get_asia_session_range(df_m15)
+        asia_high, asia_low = self.get_session_range(df_m15, config.ASIA_START_HOUR, config.ASIA_END_HOUR)
+        
+        # Fetch London Session range (only if NY session is active)
+        london_high, london_low = None, None
+        if "NEW_YORK" in session_name:
+            london_high, london_low = self.get_session_range(df_m15, config.LONDON_START_HOUR, config.LONDON_END_HOUR)
         
         # Detect Swing High/Low for Fibonacci
         swing_high = None
@@ -580,6 +628,11 @@ class XAUAnalyzer:
                         zone.score += 0.5
                         zone.details.append("M15 Trend Bearish (Price < EMA 50) (+0.5)")
                         
+            # --- PILAR 3.5: Killzone Momentum ---
+            if is_killzone and mode == "scalping":
+                zone.score += 1.0
+                zone.details.append("Session Killzone Momentum (+1.0)")
+                
             # --- PILAR 4: Konteks Sesi & Likuiditas ---
             # Asia Session Sweep
             is_asia_sweep = False
@@ -595,6 +648,22 @@ class XAUAnalyzer:
             if is_asia_sweep:
                 zone.score += 1.5
                 zone.details.append("Asia Session Liquidity Sweep Zone (+1.5)")
+                
+            # London Session Sweep (active only during NY session)
+            is_london_sweep = False
+            if "NEW_YORK" in session_name:
+                if zone.zone_type == "BUY" and london_low:
+                    # Buy zone is slightly below London Low
+                    if zone.top <= london_low and (london_low - zone.top) <= self.params["buffer"]:
+                        is_london_sweep = True
+                elif zone.zone_type == "SELL" and london_high:
+                    # Sell zone is slightly above London High
+                    if zone.bottom >= london_high and (zone.bottom - london_high) <= self.params["buffer"]:
+                        is_london_sweep = True
+                        
+            if is_london_sweep:
+                zone.score += 1.5
+                zone.details.append("London Session Liquidity Sweep Zone (+1.5)")
                 
             # CHoCH/BOS check on M5 for scalping, M15 for swing
             ch_df = df_m5 if mode == "scalping" else df_m15

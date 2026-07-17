@@ -151,7 +151,9 @@ def test_mock_analysis():
     config.CURRENT_TRADING_MODE = "swing"
     mock_dp = MockDataProvider(current_price=2345.0)
     analyzer = XAUAnalyzer(mock_dp)
-    zones = analyzer.analyze()
+    # 10:00 WIB, Asia Session
+    test_time_swing = datetime(2026, 7, 17, 10, 0, tzinfo=pytz.timezone(config.TIMEZONE_STR))
+    zones = analyzer.analyze(current_time=test_time_swing)
     
     print(f"\nHasil Pemindaian Mock - SWING (Ditemukan {len(zones)} zona):")
     print("=" * 60)
@@ -168,9 +170,11 @@ def test_mock_analysis():
 
     # 2. Test Scalping Mode
     config.CURRENT_TRADING_MODE = "scalping"
-    mock_dp_scalping = MockDataProvider(current_price=2336.0)
+    mock_dp_scalping = MockDataProvider(current_price=2332.0)
     analyzer_scalping = XAUAnalyzer(mock_dp_scalping)
-    zones_scalping = analyzer_scalping.analyze()
+    # 20:00 WIB, New York Session (Killzone)
+    test_time_scalping = datetime(2026, 7, 17, 20, 0, tzinfo=pytz.timezone(config.TIMEZONE_STR))
+    zones_scalping = analyzer_scalping.analyze(current_time=test_time_scalping)
     
     print(f"\nHasil Pemindaian Mock - SCALPING (Ditemukan {len(zones_scalping)} zona):")
     print("=" * 60)

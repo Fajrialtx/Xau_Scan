@@ -65,10 +65,24 @@ EMA_SLOW = 200
 MIN_SCORE_SHOW = 5.0        # Minimum score to output a signal
 HIGH_PROBABILITY_SCORE = 8.5 # Score to classify as High Probability
 
-# Asia Session Configuration (in UTC+7 Timezone)
-ASIA_START_HOUR = 7    # 07:00 WIB
-ASIA_END_HOUR = 15     # 15:00 WIB
+# Session Configuration (in GMT+7 WIB Timezone)
 TIMEZONE_STR = "Asia/Jakarta"
+
+ASIA_START_HOUR = 7     # 07:00 WIB
+ASIA_END_HOUR = 15      # 15:00 WIB
+
+LONDON_START_HOUR = 14  # 14:00 WIB
+LONDON_END_HOUR = 22    # 22:00 WIB
+
+NY_START_HOUR = 19      # 19:00 WIB
+NY_END_HOUR = 3         # 03:00 WIB (keesokan harinya)
+
+# Killzone Hours (WIB)
+LONDON_KILLZONE_START = 14
+LONDON_KILLZONE_END = 17
+
+NY_KILLZONE_START = 19.5  # 19:30 WIB
+NY_KILLZONE_END = 22.5    # 22:30 WIB
 
 # Fibonacci levels to search for overlap
 FIBO_LEVELS = [0.618, 0.786]
