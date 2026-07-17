@@ -133,6 +133,8 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
         
+        max_score = 16.0 if config.CURRENT_TRADING_MODE == "scalping" else 15.0
+        
         for idx, zone in enumerate(zones):
             # Format report text for this specific zone
             emoji = "🟢" if zone.zone_type == "BUY" else "🔴"
@@ -149,7 +151,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
                 f"----------------------------------------\n\n"
                 f"{emoji} **SETUP {idx+1}: {zone.zone_type} AREA**\n"
                 f"📍 Zona Entry: **{f_str.format(zone.bottom)} - {f_str.format(zone.top)}**\n"
-                f"⭐ Skor: **{zone.score:.1f} / 13.0** ({prob_label})\n\n"
+                f"⭐ Skor: **{zone.score:.1f} / {max_score:.1f}** ({prob_label})\n\n"
                 f"💬 *Detail Konfluensi:*\n"
             )
             for detail in zone.details:

@@ -585,11 +585,14 @@ class XAUAnalyzer:
                 zone.details.append("Daily Pivot or VWAP proximity (+1.0)")
                 
             # --- PILAR 3: Keselarasan Tren MTF ---
+            is_counter_trend = False
             if mode == "scalping":
                 if zone.zone_type == "BUY":
                     if current_price > h1_ema200:
                         zone.score += 1.0
                         zone.details.append("H1 Trend Bullish (Price > EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
                     if current_price > m15_ema50:
                         zone.score += 1.0
                         zone.details.append("M15 Trend Bullish (Price > EMA 50) (+1.0)")
@@ -600,6 +603,8 @@ class XAUAnalyzer:
                     if current_price < h1_ema200:
                         zone.score += 1.0
                         zone.details.append("H1 Trend Bearish (Price < EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
                     if current_price < m15_ema50:
                         zone.score += 1.0
                         zone.details.append("M15 Trend Bearish (Price < EMA 50) (+1.0)")
@@ -611,6 +616,8 @@ class XAUAnalyzer:
                     if current_price > h4_ema200:
                         zone.score += 1.0
                         zone.details.append("H4 Trend Bullish (Price > EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
                     if current_price > h1_ema50:
                         zone.score += 1.0
                         zone.details.append("H1 Trend Bullish (Price > EMA 50) (+1.0)")
@@ -621,12 +628,19 @@ class XAUAnalyzer:
                     if current_price < h4_ema200:
                         zone.score += 1.0
                         zone.details.append("H4 Trend Bearish (Price < EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
                     if current_price < h1_ema50:
                         zone.score += 1.0
                         zone.details.append("H1 Trend Bearish (Price < EMA 50) (+1.0)")
                     if current_price < m15_ema50:
                         zone.score += 0.5
                         zone.details.append("M15 Trend Bearish (Price < EMA 50) (+0.5)")
+                        
+            # Apply Counter-Trend penalty if active
+            if is_counter_trend:
+                zone.score -= 2.0
+                zone.details.append("Counter-Trend Setup Penalty (-2.0)")
                         
             # --- PILAR 3.5: Killzone Momentum ---
             if is_killzone and mode == "scalping":
@@ -669,8 +683,9 @@ class XAUAnalyzer:
             ch_df = df_m5 if mode == "scalping" else df_m15
             ch_label = "M5" if mode == "scalping" else "M15"
             if self.check_choch_bos(ch_df, zone.zone_type):
-                zone.score += 2.0
-                zone.details.append(f"{ch_label} CHoCH/BOS Market Structure Shift (+2.0)")
+                score_val = 2.5 if mode == "scalping" else 2.0
+                zone.score += score_val
+                zone.details.append(f"{ch_label} CHoCH/BOS Market Structure Shift (+{score_val:.1f})")
                 
             # Check if zone meets minimum score threshold
             if zone.score >= config.MIN_SCORE_SHOW:

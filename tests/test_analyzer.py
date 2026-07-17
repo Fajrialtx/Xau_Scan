@@ -159,7 +159,7 @@ def test_mock_analysis():
     print("=" * 60)
     for idx, zone in enumerate(zones):
         print(f"Zona {idx+1}: {zone.zone_type} | Rentang: {zone.bottom} - {zone.top}")
-        print(f"Skor Total: {zone.score:.2f} / 13.0")
+        print(f"Skor Total: {zone.score:.2f} / 15.0")
         print("Detail Konfluensi:")
         for detail in zone.details:
             print(f" - {detail}")
@@ -180,7 +180,7 @@ def test_mock_analysis():
     print("=" * 60)
     for idx, zone in enumerate(zones_scalping):
         print(f"Zona {idx+1}: {zone.zone_type} | Rentang: {zone.bottom} - {zone.top}")
-        print(f"Skor Total: {zone.score:.2f} / 13.0")
+        print(f"Skor Total: {zone.score:.2f} / 16.0")
         print("Detail Konfluensi:")
         for detail in zone.details:
             print(f" - {detail}")
