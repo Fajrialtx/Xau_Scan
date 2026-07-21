@@ -28,7 +28,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Trading Mode Configuration (swing or scalping)
 DEFAULT_TRADING_MODE = os.environ.get("TRADING_MODE", "swing").lower()
-if DEFAULT_TRADING_MODE not in ["swing", "scalping"]:
+if DEFAULT_TRADING_MODE not in ["swing", "scalping", "sniper"]:
     DEFAULT_TRADING_MODE = "swing"
 CURRENT_TRADING_MODE = DEFAULT_TRADING_MODE
 

@@ -42,7 +42,14 @@ class XAUAnalyzer:
     def get_symbol_params(self, symbol: str) -> dict:
         sym = symbol.upper()
         mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
-        if mode == "scalping":
+        if mode == "sniper":
+            return {
+                "impulsive_threshold": 0.8,
+                "zone_limit_range": 4.0,
+                "buffer": 0.5,
+                "decimals": 2
+            }
+        elif mode == "scalping":
             if "XAU" in sym or "GOLD" in sym:
                 return {
                     "impulsive_threshold": 1.5,
@@ -404,7 +411,22 @@ class XAUAnalyzer:
         df_d1 = self.dp.fetch_rates("D1", 10)
         current_price = self.dp.get_current_price()
         
-        if mode == "scalping":
+        if mode == "sniper":
+            df_m15 = self.dp.fetch_rates("M15", 300)
+            df_m5 = self.dp.fetch_rates("M5", 300)
+            df_m1 = self.dp.fetch_rates("M1", 300)
+            self.df_h1 = df_m1  # For chart plotting, the base chart is M1
+            
+            # Calculate EMA for trend filters
+            df_m15['ema_200'] = self.calculate_ema(df_m15, config.EMA_SLOW)
+            df_m5['ema_50'] = self.calculate_ema(df_m5, config.EMA_FAST)
+            df_m1['ema_50'] = self.calculate_ema(df_m1, config.EMA_FAST)
+            
+            # Get latest EMA values
+            m15_ema200 = df_m15['ema_200'].iloc[-1]
+            m5_ema50 = df_m5['ema_50'].iloc[-1]
+            m1_ema50 = df_m1['ema_50'].iloc[-1]
+        elif mode == "scalping":
             df_h1 = self.dp.fetch_rates("H1", 300)
             df_m30 = self.dp.fetch_rates("M30", 300)
             df_m15 = self.dp.fetch_rates("M15", 300)
@@ -444,7 +466,8 @@ class XAUAnalyzer:
         # Fetch pivot levels & VWAP
         pivots = self.calculate_pivot_points(df_d1)
         self.pivots = pivots
-        vwap = self.calculate_vwap_today(df_m5 if mode == "scalping" else df_m15)
+        vwap_df = df_m1 if mode == "sniper" else (df_m5 if mode == "scalping" else df_m15)
+        vwap = self.calculate_vwap_today(vwap_df)
         
         # Get session info based on current local time
         if current_time is None:
@@ -464,7 +487,16 @@ class XAUAnalyzer:
         # Detect Swing High/Low for Fibonacci
         swing_high = None
         swing_low = None
-        if mode == "scalping":
+        if mode == "sniper":
+            m5_highs, m5_lows = self.get_swings(df_m5, window=5)
+            m1_highs, m1_lows = self.get_swings(df_m1, window=5)
+            if len(m5_highs) > 0 and len(m5_lows) > 0:
+                swing_high = m5_highs[-1][1]
+                swing_low = m5_lows[-1][1]
+            elif len(m1_highs) > 0 and len(m1_lows) > 0:
+                swing_high = m1_highs[-1][1]
+                swing_low = m1_lows[-1][1]
+        elif mode == "scalping":
             m15_highs, m15_lows = self.get_swings(df_m15, window=10)
             m5_highs, m5_lows = self.get_swings(df_m5, window=10)
             if len(m15_highs) > 0 and len(m15_lows) > 0:
@@ -484,7 +516,15 @@ class XAUAnalyzer:
                 swing_low = m30_lows[-1][1]
                 
         # 2. Scan for Order Blocks (Core Zones) and FVGs
-        if mode == "scalping":
+        if mode == "sniper":
+            m5_obs = self.detect_order_blocks(df_m5, "M5")
+            m1_obs = self.detect_order_blocks(df_m1, "M1")
+            all_obs = m1_obs + m5_obs
+            
+            m5_fvgs = self.detect_fvgs(df_m5, "M5")
+            m1_fvgs = self.detect_fvgs(df_m1, "M1")
+            all_fvgs = m1_fvgs + m5_fvgs
+        elif mode == "scalping":
             m15_obs = self.detect_order_blocks(df_m15, "M15")
             m5_obs = self.detect_order_blocks(df_m5, "M5")
             all_obs = m15_obs + m5_obs
@@ -557,16 +597,18 @@ class XAUAnalyzer:
                     
                     # Check if fib levels lie inside or close to the OB zone
                     if (zone.bottom - fib_tol <= fib_618 <= zone.top + fib_tol) or (zone.bottom - fib_tol <= fib_786 <= zone.top + fib_tol):
-                        zone.score += 2.0
-                        zone.details.append("Fibonacci Retracement (61.8% / 78.6%) overlap (+2.0)")
+                        fib_sc = 1.0 if mode == "sniper" else 2.0
+                        zone.score += fib_sc
+                        zone.details.append(f"Fibonacci Retracement (61.8% / 78.6%) overlap (+{fib_sc:.1f})")
                 else:
                     # Pull Fibonacci High to Low (for downtrend sell entries)
                     fib_618 = swing_low + 0.618 * fib_range
                     fib_786 = swing_low + 0.786 * fib_range
                     
                     if (zone.bottom - fib_tol <= fib_618 <= zone.top + fib_tol) or (zone.bottom - fib_tol <= fib_786 <= zone.top + fib_tol):
-                        zone.score += 2.0
-                        zone.details.append("Fibonacci Retracement (61.8% / 78.6%) overlap (+2.0)")
+                        fib_sc = 1.0 if mode == "sniper" else 2.0
+                        zone.score += fib_sc
+                        zone.details.append(f"Fibonacci Retracement (61.8% / 78.6%) overlap (+{fib_sc:.1f})")
                         
             # Pivot Points & VWAP
             near_pivot_or_vwap = False
@@ -581,12 +623,32 @@ class XAUAnalyzer:
                     near_pivot_or_vwap = True
                     
             if near_pivot_or_vwap:
-                zone.score += 1.0
-                zone.details.append("Daily Pivot or VWAP proximity (+1.0)")
+                pv_score = 1.5 if mode == "sniper" else 1.0
+                zone.score += pv_score
+                zone.details.append(f"Daily Pivot or VWAP proximity (+{pv_score:.1f})")
                 
             # --- PILAR 3: Keselarasan Tren MTF ---
             is_counter_trend = False
-            if mode == "scalping":
+            if mode == "sniper":
+                if zone.zone_type == "BUY":
+                    if current_price > m15_ema200:
+                        zone.score += 1.0
+                        zone.details.append("M15 Trend Bullish (Price > EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
+                    if current_price > m5_ema50:
+                        zone.score += 1.0
+                        zone.details.append("M5 Trend Bullish (Price > EMA 50) (+1.0)")
+                else:
+                    if current_price < m15_ema200:
+                        zone.score += 1.0
+                        zone.details.append("M15 Trend Bearish (Price < EMA 200) (+1.0)")
+                    else:
+                        is_counter_trend = True
+                    if current_price < m5_ema50:
+                        zone.score += 1.0
+                        zone.details.append("M5 Trend Bearish (Price < EMA 50) (+1.0)")
+            elif mode == "scalping":
                 if zone.zone_type == "BUY":
                     if current_price > h1_ema200:
                         zone.score += 1.0
@@ -643,9 +705,31 @@ class XAUAnalyzer:
                 zone.details.append("Counter-Trend Setup Penalty (-2.0)")
                         
             # --- PILAR 3.5: Killzone Momentum ---
-            if is_killzone and mode == "scalping":
-                zone.score += 1.0
-                zone.details.append("Session Killzone Momentum (+1.0)")
+            if is_killzone and mode in ["scalping", "sniper"]:
+                score_kz = 1.5 if mode == "sniper" else 1.0
+                zone.score += score_kz
+                zone.details.append(f"Session Killzone Momentum (+{score_kz:.1f})")
+                
+            # Additional M1 specific checks for Sniper mode
+            if mode == "sniper":
+                # Volume Spike on M1
+                if len(df_m1) >= 20:
+                    recent_vol = df_m1['tick_volume'].iloc[-2]
+                    avg_vol = df_m1['tick_volume'].iloc[-21:-1].mean()
+                    if avg_vol > 0 and recent_vol > 1.5 * avg_vol:
+                        zone.score += 1.0
+                        zone.details.append("M1 Volume Spike Confluence (+1.0)")
+                        
+                # M1 Micro Liquidity Sweep
+                if len(m1_highs) > 0 and len(m1_lows) > 0:
+                    recent_m1_high = m1_highs[-1][1]
+                    recent_m1_low = m1_lows[-1][1]
+                    if zone.zone_type == "BUY" and abs(zone.top - recent_m1_low) <= self.params["buffer"]:
+                        zone.score += 1.5
+                        zone.details.append("M1 Micro Liquidity Sweep Zone (+1.5)")
+                    elif zone.zone_type == "SELL" and abs(zone.bottom - recent_m1_high) <= self.params["buffer"]:
+                        zone.score += 1.5
+                        zone.details.append("M1 Micro Liquidity Sweep Zone (+1.5)")
                 
             # --- PILAR 4: Konteks Sesi & Likuiditas ---
             # Asia Session Sweep
@@ -679,11 +763,11 @@ class XAUAnalyzer:
                 zone.score += 1.5
                 zone.details.append("London Session Liquidity Sweep Zone (+1.5)")
                 
-            # CHoCH/BOS check on M5 for scalping, M15 for swing
-            ch_df = df_m5 if mode == "scalping" else df_m15
-            ch_label = "M5" if mode == "scalping" else "M15"
+            # CHoCH/BOS check on M1 for sniper, M5 for scalping, M15 for swing
+            ch_df = df_m1 if mode == "sniper" else (df_m5 if mode == "scalping" else df_m15)
+            ch_label = "M1" if mode == "sniper" else ("M5" if mode == "scalping" else "M15")
             if self.check_choch_bos(ch_df, zone.zone_type):
-                score_val = 2.5 if mode == "scalping" else 2.0
+                score_val = 2.0 if mode == "sniper" else (2.5 if mode == "scalping" else 2.0)
                 zone.score += score_val
                 zone.details.append(f"{ch_label} CHoCH/BOS Market Structure Shift (+{score_val:.1f})")
                 
@@ -743,7 +827,9 @@ class XAUAnalyzer:
         mode = getattr(config, "CURRENT_TRADING_MODE", "swing")
         # Sort by timeframe priority (H4/M15 first, then H1/M5) and then score descending
         def sort_key(z):
-            if mode == "scalping":
+            if mode == "sniper":
+                tf_weight = 3 if z.timeframe == "M15" else (2 if z.timeframe == "M5" else 1)
+            elif mode == "scalping":
                 tf_weight = 2 if z.timeframe == "M15" else 1
             else:
                 tf_weight = 2 if z.timeframe == "H4" else 1

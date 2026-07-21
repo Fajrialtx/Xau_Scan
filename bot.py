@@ -43,7 +43,10 @@ async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("📈 Swing / Intraday", callback_data="switch_mode_swing"),
-            InlineKeyboardButton("⚡ Scalping (Tf Kecil)", callback_data="switch_mode_scalping")
+            InlineKeyboardButton("⚡ Scalping (M5/M15)", callback_data="switch_mode_scalping")
+        ],
+        [
+            InlineKeyboardButton("🎯 Sniper (M1 Gold Only)", callback_data="switch_mode_sniper")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -61,6 +64,15 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ *Pair tidak didukung.*", parse_mode="Markdown")
         return
         
+    if config.CURRENT_TRADING_MODE == "sniper" and pair_key != "xau":
+        await update.message.reply_text(
+            "⚠️ **MODE SNIPER KHUSUS XAU/USD (GOLD)**\n\n"
+            f"Mode Sniper saat ini aktif, namun mode ini khusus dirancang untuk analisis TF 1 Menit pada XAU/USD.\n\n"
+            f"Untuk memindai **{symbol}**, silakan ubah mode trading terlebih dahulu ke **Swing** atau **Scalping** menggunakan perintah /set_mode.",
+            parse_mode="Markdown"
+        )
+        return
+
     status_message = await update.message.reply_text(
         f"🔍 *Memulai pemindaian pasar {symbol}... Mohon tunggu.*", 
         parse_mode="Markdown"
@@ -133,7 +145,8 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
         
-        max_score = 16.0 if config.CURRENT_TRADING_MODE == "scalping" else 15.0
+        max_score = 18.0 if config.CURRENT_TRADING_MODE == "sniper" else (16.0 if config.CURRENT_TRADING_MODE == "scalping" else 15.0)
+        chart_tf = "M1" if config.CURRENT_TRADING_MODE == "sniper" else ("M15" if config.CURRENT_TRADING_MODE == "scalping" else "H1")
         
         for idx, zone in enumerate(zones):
             # Format report text for this specific zone
@@ -183,7 +196,7 @@ async def execute_scan_for_pair(update: Update, context: ContextTypes.DEFAULT_TY
                     current_price=current_price,
                     pivots=analyzer.pivots,
                     symbol=symbol,
-                    timeframe="M15" if config.CURRENT_TRADING_MODE == "scalping" else "H1",
+                    timeframe=chart_tf,
                     save_path=chart_path,
                     decimals=decimals
                 )
@@ -549,10 +562,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("switch_mode_"):
         try:
-            new_mode = data.split("_")[-1]  # "swing" or "scalping"
+            new_mode = data.split("_")[-1]  # "swing", "scalping", or "sniper"
             config.CURRENT_TRADING_MODE = new_mode
             
-            mode_label = "📈 SWING / INTRADAY" if new_mode == "swing" else "⚡ SCALPING (Tf Kecil)"
+            if new_mode == "swing":
+                mode_label = "📈 SWING / INTRADAY"
+            elif new_mode == "scalping":
+                mode_label = "⚡ SCALPING (Tf Kecil M5/M15)"
+            else:
+                mode_label = "🎯 SNIPER (M1 XAU/USD Only)"
             
             # Edit the message to show confirmation and remove buttons
             await query.edit_message_reply_markup(reply_markup=None)
